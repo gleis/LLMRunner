@@ -7,8 +7,9 @@ LLMRunner is a no-GUI macOS service that exposes an OpenAI-compatible HTTP API f
 It is intentionally small:
 
 - `GET /v1/models` lists configured local models.
-- `POST /v1/chat/completions` starts the requested model if needed and generates with embedded `libllama` by default.
-- `POST /v1/completions` and `/v1/embeddings` are still available through `llama-server` backend mode.
+- `POST /v1/chat/completions` starts the requested model if needed and generates with embedded `libllama` by default, including OpenAI-style streaming.
+- `POST /v1/completions` generates raw prompt completions with embedded `libllama`.
+- `POST /v1/embeddings` computes embeddings with embedded `libllama`.
 - `GET /health` returns service health.
 
 The default inference engine is embedded `libllama` from llama.cpp. LLMRunner owns model selection, model loading, and the stable OpenAI-compatible front door.
@@ -60,7 +61,7 @@ LLMRunner supports two backend modes:
 }
 ```
 
-`embedded` is the default and runs chat completions in-process through `libllama`.
+`embedded` is the default and runs chat completions, text completions, and embeddings in-process through `libllama`.
 
 ```json
 {
@@ -70,7 +71,7 @@ LLMRunner supports two backend modes:
 }
 ```
 
-`server` starts and proxies to `llama-server`. Use this for `/v1/completions`, `/v1/embeddings`, or as a fallback while embedded support matures.
+`server` starts and proxies to `llama-server`. Use this as a compatibility fallback if a model or route behaves better through `llama-server`.
 
 In server mode, LLMRunner looks for `backend.executable` in a bundle-friendly order:
 
@@ -238,8 +239,9 @@ Only one model process is kept active at a time. If a request asks for a differe
 - macOS only.
 - GGUF models only.
 - No API authentication yet.
-- Embedded backend currently supports `/v1/chat/completions` only.
-- `/v1/completions` and `/v1/embeddings` still require `backend.mode: "server"`.
+- Embedded chat streaming is supported for `/v1/chat/completions`.
+- Completion streaming for `/v1/completions` is not implemented yet.
+- Embedded embeddings depend on model compatibility; not every GGUF model is a good embedding model.
 - One active embedded model at a time.
 - Public binary releases still need Developer ID signing and notarization.
 - The package script currently expects Homebrew-provided `llama.cpp`/`ggml` libraries on the build machine.

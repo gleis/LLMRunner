@@ -17,9 +17,9 @@ Authentication is not enforced yet. If a client requires an API key, use any non
 | `GET` | `/health` | Service health check. |
 | `GET` | `/v1/health` | Versioned health check. |
 | `GET` | `/v1/models` | Lists configured local models. |
-| `POST` | `/v1/chat/completions` | Starts the requested model if needed, then generates through the configured backend. Embedded mode supports this route. |
-| `POST` | `/v1/completions` | Available in `backend.mode: "server"` by proxying to `llama-server`. |
-| `POST` | `/v1/embeddings` | Available in `backend.mode: "server"` by proxying to `llama-server`. |
+| `POST` | `/v1/chat/completions` | Starts the requested model if needed, then generates through the configured backend. Embedded mode supports normal and streaming responses. |
+| `POST` | `/v1/completions` | Generates raw prompt completions. Embedded mode supports non-streaming responses. |
+| `POST` | `/v1/embeddings` | Computes embeddings. Embedded support depends on model compatibility. |
 
 ## Model Selection
 
@@ -100,6 +100,22 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 
 In embedded mode, LLMRunner returns an OpenAI-style response. In server mode, response shape is produced by `llama-server`.
 
+For streaming, set:
+
+```json
+{
+  "stream": true
+}
+```
+
+The response uses server-sent events:
+
+```text
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[...]}
+
+data: [DONE]
+```
+
 ```json
 {
   "id": "chatcmpl-example",
@@ -142,7 +158,7 @@ curl http://127.0.0.1:8080/v1/completions \
   }'
 ```
 
-This route is not implemented by the embedded backend yet. Set `backend.mode` to `server` to proxy it to `llama-server`.
+The embedded backend accepts a string `prompt` and returns an OpenAI-style text completion response. Completion streaming is not implemented yet.
 
 ## Embeddings
 
@@ -161,7 +177,7 @@ curl http://127.0.0.1:8080/v1/embeddings \
   }'
 ```
 
-This route is not implemented by the embedded backend yet. Set `backend.mode` to `server` to proxy it to `llama-server`. Embedding support depends on the selected model and backend configuration.
+Embedded mode computes embeddings through `libllama`. Embedding support depends on the selected model and backend configuration; many chat-tuned GGUFs can produce vectors, but dedicated embedding models are usually better.
 
 ## Errors
 

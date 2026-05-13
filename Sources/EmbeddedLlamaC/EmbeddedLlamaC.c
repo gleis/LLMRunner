@@ -195,6 +195,128 @@ static struct llama_sampler * make_sampler(llmr_generation_options options) {
     return sampler;
 }
 
+static bool append_token_piece(
+    llmr_engine * engine,
+    llama_token token,
+    struct string_builder * output,
+    llmr_token_callback callback,
+    void * user_data,
+    char ** error_out
+) {
+    char piece[256];
+    int32_t piece_length = llama_token_to_piece(engine->vocab, token, piece, sizeof(piece), 0, false);
+
+    if (piece_length < 0) {
+        int32_t needed = -piece_length;
+        char * large_piece = (char *) malloc((size_t) needed);
+        if (large_piece == NULL) {
+            set_error(error_out, "Could not allocate token piece.");
+            return false;
+        }
+
+        piece_length = llama_token_to_piece(engine->vocab, token, large_piece, needed, 0, false);
+        if (piece_length > 0) {
+            if (!sb_append(output, large_piece, (size_t) piece_length)) {
+                free(large_piece);
+                set_error(error_out, "Could not append token piece.");
+                return false;
+            }
+            if (callback != NULL) {
+                callback(large_piece, (size_t) piece_length, user_data);
+            }
+        }
+        free(large_piece);
+        return true;
+    }
+
+    if (piece_length > 0) {
+        if (!sb_append(output, piece, (size_t) piece_length)) {
+            set_error(error_out, "Could not append token piece.");
+            return false;
+        }
+        if (callback != NULL) {
+            callback(piece, (size_t) piece_length, user_data);
+        }
+    }
+
+    return true;
+}
+
+static char * generate_from_prompt(
+    llmr_engine * engine,
+    const char * prompt,
+    llmr_generation_options options,
+    llmr_token_callback callback,
+    void * user_data,
+    char ** error_out
+) {
+    if (engine == NULL || engine->context == NULL || engine->vocab == NULL) {
+        set_error(error_out, "Embedded engine is not initialized.");
+        return NULL;
+    }
+
+    llama_token * prompt_tokens = NULL;
+    int32_t prompt_count = tokenize_prompt(engine->vocab, prompt, &prompt_tokens);
+
+    if (prompt_count <= 0) {
+        set_error(error_out, "Could not tokenize prompt.");
+        return NULL;
+    }
+
+    llama_memory_clear(llama_get_memory(engine->context), true);
+
+    struct llama_batch prompt_batch = llama_batch_get_one(prompt_tokens, prompt_count);
+    int32_t decode_result = llama_decode(engine->context, prompt_batch);
+    free(prompt_tokens);
+
+    if (decode_result != 0) {
+        set_error(error_out, "Prompt decode failed with code %d.", decode_result);
+        return NULL;
+    }
+
+    struct llama_sampler * sampler = make_sampler(options);
+    if (sampler == NULL) {
+        set_error(error_out, "Could not create sampler.");
+        return NULL;
+    }
+
+    struct string_builder output;
+    if (!sb_init(&output)) {
+        llama_sampler_free(sampler);
+        set_error(error_out, "Could not allocate output buffer.");
+        return NULL;
+    }
+
+    int32_t max_tokens = options.max_tokens > 0 ? options.max_tokens : 256;
+
+    for (int32_t i = 0; i < max_tokens; i++) {
+        llama_token token = llama_sampler_sample(sampler, engine->context, -1);
+        llama_sampler_accept(sampler, token);
+
+        if (llama_vocab_is_eog(engine->vocab, token)) {
+            break;
+        }
+
+        if (!append_token_piece(engine, token, &output, callback, user_data, error_out)) {
+            free(output.data);
+            llama_sampler_free(sampler);
+            return NULL;
+        }
+
+        struct llama_batch next_batch = llama_batch_get_one(&token, 1);
+        decode_result = llama_decode(engine->context, next_batch);
+        if (decode_result != 0) {
+            free(output.data);
+            llama_sampler_free(sampler);
+            set_error(error_out, "Token decode failed with code %d.", decode_result);
+            return NULL;
+        }
+    }
+
+    llama_sampler_free(sampler);
+    return output.data;
+}
+
 void llmr_backend_init(void) {
     static bool initialized = false;
     if (!initialized) {
@@ -271,94 +393,133 @@ char * llmr_generate_chat(
     llmr_generation_options options,
     char ** error_out
 ) {
-    if (engine == NULL || engine->context == NULL || engine->vocab == NULL) {
-        set_error(error_out, "Embedded engine is not initialized.");
-        return NULL;
-    }
-
     char * prompt = apply_chat_template(engine, messages, message_count, error_out);
     if (prompt == NULL) {
         return NULL;
     }
 
-    llama_token * prompt_tokens = NULL;
-    int32_t prompt_count = tokenize_prompt(engine->vocab, prompt, &prompt_tokens);
+    char * output = generate_from_prompt(engine, prompt, options, NULL, NULL, error_out);
     free(prompt);
+    return output;
+}
 
-    if (prompt_count <= 0) {
-        set_error(error_out, "Could not tokenize prompt.");
+char * llmr_generate_chat_stream(
+    llmr_engine * engine,
+    const llmr_message * messages,
+    size_t message_count,
+    llmr_generation_options options,
+    llmr_token_callback callback,
+    void * user_data,
+    char ** error_out
+) {
+    char * prompt = apply_chat_template(engine, messages, message_count, error_out);
+    if (prompt == NULL) {
         return NULL;
     }
 
-    llama_memory_clear(llama_get_memory(engine->context), true);
+    char * output = generate_from_prompt(engine, prompt, options, callback, user_data, error_out);
+    free(prompt);
+    return output;
+}
 
-    struct llama_batch prompt_batch = llama_batch_get_one(prompt_tokens, prompt_count);
-    int32_t decode_result = llama_decode(engine->context, prompt_batch);
-    free(prompt_tokens);
+char * llmr_generate_completion(
+    llmr_engine * engine,
+    const char * prompt,
+    llmr_generation_options options,
+    llmr_token_callback callback,
+    void * user_data,
+    char ** error_out
+) {
+    return generate_from_prompt(engine, prompt, options, callback, user_data, error_out);
+}
+
+llmr_embedding_result llmr_embed_text(
+    const char * model_path,
+    int32_t context_size,
+    int32_t gpu_layers,
+    const char * input,
+    char ** error_out
+) {
+    llmr_embedding_result empty = { NULL, 0 };
+    llmr_backend_init();
+
+    struct llama_model_params model_params = llama_model_default_params();
+    model_params.n_gpu_layers = gpu_layers;
+
+    struct llama_model * model = llama_model_load_from_file(model_path, model_params);
+    if (model == NULL) {
+        set_error(error_out, "Could not load embedding model at %s.", model_path);
+        return empty;
+    }
+
+    struct llama_context_params context_params = llama_context_default_params();
+    context_params.n_ctx = context_size > 0 ? (uint32_t) context_size : 8192;
+    context_params.n_batch = 512;
+    context_params.n_seq_max = 1;
+    context_params.embeddings = true;
+    context_params.pooling_type = LLAMA_POOLING_TYPE_MEAN;
+
+    struct llama_context * context = llama_init_from_model(model, context_params);
+    if (context == NULL) {
+        llama_model_free(model);
+        set_error(error_out, "Could not create embedding context for %s.", model_path);
+        return empty;
+    }
+
+    const struct llama_vocab * vocab = llama_model_get_vocab(model);
+    llama_token * tokens = NULL;
+    int32_t token_count = tokenize_prompt(vocab, input, &tokens);
+    if (token_count <= 0) {
+        llama_free(context);
+        llama_model_free(model);
+        set_error(error_out, "Could not tokenize embedding input.");
+        return empty;
+    }
+
+    struct llama_batch batch = llama_batch_get_one(tokens, token_count);
+    int32_t decode_result = llama_decode(context, batch);
+    free(tokens);
 
     if (decode_result != 0) {
-        set_error(error_out, "Prompt decode failed with code %d.", decode_result);
-        return NULL;
+        llama_free(context);
+        llama_model_free(model);
+        set_error(error_out, "Embedding decode failed with code %d.", decode_result);
+        return empty;
     }
 
-    struct llama_sampler * sampler = make_sampler(options);
-    if (sampler == NULL) {
-        set_error(error_out, "Could not create sampler.");
-        return NULL;
+    float * source = llama_get_embeddings_seq(context, 0);
+    if (source == NULL) {
+        source = llama_get_embeddings_ith(context, -1);
     }
 
-    struct string_builder output;
-    if (!sb_init(&output)) {
-        llama_sampler_free(sampler);
-        set_error(error_out, "Could not allocate output buffer.");
-        return NULL;
+    if (source == NULL) {
+        llama_free(context);
+        llama_model_free(model);
+        set_error(error_out, "Model did not return embeddings.");
+        return empty;
     }
 
-    int32_t max_tokens = options.max_tokens > 0 ? options.max_tokens : 256;
-
-    for (int32_t i = 0; i < max_tokens; i++) {
-        llama_token token = llama_sampler_sample(sampler, engine->context, -1);
-        llama_sampler_accept(sampler, token);
-
-        if (llama_vocab_is_eog(engine->vocab, token)) {
-            break;
-        }
-
-        char piece[256];
-        int32_t piece_length = llama_token_to_piece(engine->vocab, token, piece, sizeof(piece), 0, false);
-        if (piece_length < 0) {
-            int32_t needed = -piece_length;
-            char * large_piece = (char *) malloc((size_t) needed);
-            if (large_piece == NULL) {
-                free(output.data);
-                llama_sampler_free(sampler);
-                set_error(error_out, "Could not allocate token piece.");
-                return NULL;
-            }
-
-            piece_length = llama_token_to_piece(engine->vocab, token, large_piece, needed, 0, false);
-            if (piece_length > 0) {
-                sb_append(&output, large_piece, (size_t) piece_length);
-            }
-            free(large_piece);
-        } else if (piece_length > 0) {
-            sb_append(&output, piece, (size_t) piece_length);
-        }
-
-        struct llama_batch next_batch = llama_batch_get_one(&token, 1);
-        decode_result = llama_decode(engine->context, next_batch);
-        if (decode_result != 0) {
-            free(output.data);
-            llama_sampler_free(sampler);
-            set_error(error_out, "Token decode failed with code %d.", decode_result);
-            return NULL;
-        }
+    int32_t count = llama_model_n_embd(model);
+    float * values = (float *) malloc((size_t) count * sizeof(float));
+    if (values == NULL) {
+        llama_free(context);
+        llama_model_free(model);
+        set_error(error_out, "Could not allocate embedding output.");
+        return empty;
     }
 
-    llama_sampler_free(sampler);
-    return output.data;
+    memcpy(values, source, (size_t) count * sizeof(float));
+    llama_free(context);
+    llama_model_free(model);
+
+    llmr_embedding_result result = { values, count };
+    return result;
 }
 
 void llmr_string_free(char * value) {
     free(value);
+}
+
+void llmr_embedding_result_free(llmr_embedding_result result) {
+    free(result.values);
 }

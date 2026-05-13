@@ -26,6 +26,7 @@ struct HTTPResponse: Sendable {
     var reason: String
     var headers: [String: String]
     var body: Data
+    var streamBody: AsyncThrowingStream<Data, Error>?
 
     static func json(statusCode: Int = 200, object: Any) -> HTTPResponse {
         let data = (try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted])) ?? Data()
@@ -36,7 +37,8 @@ struct HTTPResponse: Sendable {
                 "Content-Type": "application/json",
                 "Content-Length": "\(data.count)"
             ],
-            body: data
+            body: data,
+            streamBody: nil
         )
     }
 
@@ -49,24 +51,44 @@ struct HTTPResponse: Sendable {
                 "Content-Type": "text/plain; charset=utf-8",
                 "Content-Length": "\(data.count)"
             ],
-            body: data
+            body: data,
+            streamBody: nil
+        )
+    }
+
+    static func stream(statusCode: Int = 200, headers: [String: String], body: AsyncThrowingStream<Data, Error>) -> HTTPResponse {
+        HTTPResponse(
+            statusCode: statusCode,
+            reason: HTTPStatus.reason(for: statusCode),
+            headers: headers,
+            body: Data(),
+            streamBody: body
         )
     }
 
     func serialized() -> Data {
+        var data = serializedHeaders(includeContentLength: true)
+        data.append(body)
+        return data
+    }
+
+    func serializedHeaders(includeContentLength: Bool) -> Data {
         var data = Data()
         data.append("HTTP/1.1 \(statusCode) \(reason)\r\n")
 
         var mergedHeaders = headers
         mergedHeaders["Connection"] = "close"
-        mergedHeaders["Content-Length"] = "\(body.count)"
+        if includeContentLength {
+            mergedHeaders["Content-Length"] = "\(body.count)"
+        } else {
+            mergedHeaders.removeValue(forKey: "Content-Length")
+        }
 
         for (name, value) in mergedHeaders.sorted(by: { $0.key.lowercased() < $1.key.lowercased() }) {
             data.append("\(name): \(value)\r\n")
         }
 
         data.append("\r\n")
-        data.append(body)
         return data
     }
 }

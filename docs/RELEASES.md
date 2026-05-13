@@ -35,6 +35,9 @@ Checklist:
 - Pull or reuse a small GGUF model with `dist/llmrunner models pull tiny`.
 - Verify `curl http://127.0.0.1:8080/v1/models`.
 - Verify one chat completion.
+- Verify one streaming chat completion with `"stream": true`.
+- Verify one text completion.
+- Verify one embeddings request.
 - Verify `otool -L dist/LLMRunner.app/Contents/MacOS/llmrunner` points `libllama` and `libggml` at `@executable_path/../Resources/lib`.
 - Verify `codesign --verify --deep --strict dist/LLMRunner.app`.
 - Stop the service with `dist/llmrunner stop`.

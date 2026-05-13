@@ -54,7 +54,14 @@ final class HTTPServer: @unchecked Sendable {
             let data = try await readRequestData(from: connection)
             let request = try parseRequest(data)
             let response = await handler(request)
-            try await send(response.serialized(), to: connection)
+            if let streamBody = response.streamBody {
+                try await send(response.serializedHeaders(includeContentLength: false), to: connection)
+                for try await chunk in streamBody {
+                    try await send(chunk, to: connection)
+                }
+            } else {
+                try await send(response.serialized(), to: connection)
+            }
         } catch {
             let response = HTTPResponse.json(
                 statusCode: 400,

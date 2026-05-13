@@ -24,6 +24,17 @@ typedef struct llmr_generation_options {
     uint32_t seed;
 } llmr_generation_options;
 
+typedef struct llmr_embedding_result {
+    float * values;
+    int32_t count;
+} llmr_embedding_result;
+
+typedef void (*llmr_token_callback)(
+    const char * bytes,
+    size_t length,
+    void * user_data
+);
+
 void llmr_backend_init(void);
 
 llmr_engine * llmr_engine_create(
@@ -43,7 +54,35 @@ char * llmr_generate_chat(
     char ** error_out
 );
 
+char * llmr_generate_chat_stream(
+    llmr_engine * engine,
+    const llmr_message * messages,
+    size_t message_count,
+    llmr_generation_options options,
+    llmr_token_callback callback,
+    void * user_data,
+    char ** error_out
+);
+
+char * llmr_generate_completion(
+    llmr_engine * engine,
+    const char * prompt,
+    llmr_generation_options options,
+    llmr_token_callback callback,
+    void * user_data,
+    char ** error_out
+);
+
+llmr_embedding_result llmr_embed_text(
+    const char * model_path,
+    int32_t context_size,
+    int32_t gpu_layers,
+    const char * input,
+    char ** error_out
+);
+
 void llmr_string_free(char * value);
+void llmr_embedding_result_free(llmr_embedding_result result);
 
 #ifdef __cplusplus
 }
