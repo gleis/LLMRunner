@@ -13,6 +13,10 @@ struct OpenAIService: Sendable {
 
     func handle(_ request: HTTPRequest) async -> HTTPResponse {
         do {
+            guard isAuthorized(request) else {
+                return Self.unauthorizedResponse()
+            }
+
             switch (request.method, request.querylessPath) {
             case ("GET", "/health"), ("GET", "/v1/health"):
                 return .json(object: ["status": "ok"])
@@ -375,6 +379,73 @@ struct OpenAIService: Sendable {
         return model
     }
 
+    private func isAuthorized(_ request: HTTPRequest) -> Bool {
+        if request.querylessPath == "/health" || request.querylessPath == "/v1/health" {
+            return true
+        }
+
+        let keys = configuredAPIKeys()
+        guard !keys.isEmpty else {
+            return true
+        }
+
+        guard let presentedKey = presentedAPIKey(in: request) else {
+            return false
+        }
+
+        return keys.contains { constantTimeEquals($0, presentedKey) }
+    }
+
+    private func configuredAPIKeys() -> [String] {
+        let security = config.effectiveSecurity
+        var keys = security.apiKeys.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        if
+            let envName = security.apiKeyEnv?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !envName.isEmpty,
+            let envValue = ProcessInfo.processInfo.environment[envName]?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !envValue.isEmpty
+        {
+            keys.append(envValue)
+        }
+
+        return keys.filter { !$0.isEmpty }
+    }
+
+    private func presentedAPIKey(in request: HTTPRequest) -> String? {
+        if let apiKey = request.headers["x-api-key"]?.trimmingCharacters(in: .whitespacesAndNewlines), !apiKey.isEmpty {
+            return apiKey
+        }
+
+        guard let authorization = request.headers["authorization"]?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return nil
+        }
+
+        let prefix = "bearer "
+        let lowercased = authorization.lowercased()
+        guard lowercased.hasPrefix(prefix), authorization.count > prefix.count else {
+            return nil
+        }
+
+        let index = authorization.index(authorization.startIndex, offsetBy: prefix.count)
+        return String(authorization[index...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func constantTimeEquals(_ lhs: String, _ rhs: String) -> Bool {
+        let lhsBytes = Array(lhs.utf8)
+        let rhsBytes = Array(rhs.utf8)
+        guard lhsBytes.count == rhsBytes.count else {
+            return false
+        }
+
+        var difference: UInt8 = 0
+        for (left, right) in zip(lhsBytes, rhsBytes) {
+            difference |= left ^ right
+        }
+
+        return difference == 0
+    }
+
     private static func sseData(object: Any) -> Data {
         let json = (try? JSONSerialization.data(withJSONObject: object)) ?? Data("{}".utf8)
         let text = String(decoding: json, as: UTF8.self)
@@ -412,9 +483,25 @@ struct OpenAIService: Sendable {
         return .json(statusCode: status, object: errorObject(for: error, type: type, code: code))
     }
 
+    private static func unauthorizedResponse() -> HTTPResponse {
+        let object = errorObject(
+            message: "Missing or invalid API key.",
+            type: "invalid_request_error",
+            code: "invalid_api_key"
+        )
+
+        var response = HTTPResponse.json(statusCode: 401, object: object)
+        response.headers["WWW-Authenticate"] = "Bearer"
+        return response
+    }
+
     private static func errorObject(for error: Error, type: String = "server_error", code: String? = nil) -> [String: Any] {
+        errorObject(message: error.localizedDescription, type: type, code: code)
+    }
+
+    private static func errorObject(message: String, type: String, code: String? = nil) -> [String: Any] {
         var details: [String: Any] = [
-            "message": error.localizedDescription,
+            "message": message,
             "type": type
         ]
 

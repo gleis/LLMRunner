@@ -2,7 +2,7 @@
 
 LLMRunner is a no-GUI macOS service that exposes an OpenAI-compatible HTTP API for local GGUF models. It can run models in-process through embedded `libllama`, or proxy to `llama-server` as a fallback backend.
 
-> Alpha status: LLMRunner is useful today for local development and experiments, but it is not yet a polished consumer installer. The API binds to localhost by default and does not enforce authentication.
+> Alpha status: LLMRunner is useful today for local development and experiments, but it is not yet a polished consumer installer. The API binds to localhost by default. API key authentication is optional and should be enabled before binding to anything other than localhost.
 
 It is intentionally small:
 
@@ -131,7 +131,7 @@ Point SDKs at:
 
 ```text
 base_url: http://127.0.0.1:8080/v1
-api_key: any non-empty string
+api_key: local, or your configured API key if auth is enabled
 ```
 
 Full HTTP API documentation is in [docs/API.md](docs/API.md).
@@ -145,6 +145,7 @@ The same binary manages the background service and local model library:
 ```sh
 llmrunner start
 llmrunner status
+llmrunner logs
 llmrunner stop
 ```
 
@@ -169,6 +170,32 @@ For isolated tests or portable installs, set:
 
 ```sh
 export LLMRUNNER_HOME=/path/to/runtime-directory
+```
+
+## Security And Logging
+
+LLMRunner binds to `127.0.0.1` by default. To require an API key, set an environment variable before starting:
+
+```sh
+export LLMRUNNER_API_KEY="$(openssl rand -hex 32)"
+llmrunner start
+```
+
+Clients can send either:
+
+```text
+Authorization: Bearer <key>
+x-api-key: <key>
+```
+
+You can also store keys in `security.apiKeys` in `~/.llmrunner/config.json`. Request logging is enabled by default and writes method, path, status, and duration without request bodies or authorization headers.
+
+Requests are capped at `security.maxRequestBodyBytes`, which defaults to `10485760` bytes.
+
+```sh
+llmrunner logs --lines 50
+llmrunner logs --follow
+llmrunner logs --errors
 ```
 
 ## Test Chatbot
@@ -239,7 +266,7 @@ Only one model process is kept active at a time. If a request asks for a differe
 
 - macOS only.
 - GGUF models only.
-- No API authentication yet.
+- API authentication is optional and disabled until an API key is configured.
 - Embedded chat streaming is supported for `/v1/chat/completions`.
 - Embedded completion streaming is supported for `/v1/completions`.
 - Embedded embeddings depend on model compatibility; not every GGUF model is a good embedding model.

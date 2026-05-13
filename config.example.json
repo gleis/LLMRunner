@@ -11,6 +11,15 @@
     "extraArguments": ["--jinja"],
     "startupTimeoutSeconds": 60
   },
+  "security": {
+    "apiKeys": [],
+    "apiKeyEnv": "LLMRUNNER_API_KEY",
+    "maxRequestBodyBytes": 10485760
+  },
+  "logging": {
+    "requests": true,
+    "level": "info"
+  },
   "defaultModel": "",
   "models": []
 }

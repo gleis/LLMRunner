@@ -23,8 +23,21 @@ struct AppConfig: Codable, Sendable {
         var arguments: [String]
     }
 
+    struct Security: Codable, Sendable {
+        var apiKeys: [String]
+        var apiKeyEnv: String?
+        var maxRequestBodyBytes: Int?
+    }
+
+    struct Logging: Codable, Sendable {
+        var requests: Bool
+        var level: String
+    }
+
     var server: Server
     var backend: Backend
+    var security: Security?
+    var logging: Logging?
     var defaultModel: String
     var models: [Model]
 
@@ -71,6 +84,15 @@ struct AppConfig: Codable, Sendable {
                 extraArguments: ["--jinja"],
                 startupTimeoutSeconds: 60
             ),
+            security: Security(
+                apiKeys: [],
+                apiKeyEnv: "LLMRUNNER_API_KEY",
+                maxRequestBodyBytes: 10_485_760
+            ),
+            logging: Logging(
+                requests: true,
+                level: "info"
+            ),
             defaultModel: "",
             models: []
         )
@@ -102,6 +124,14 @@ struct AppConfig: Codable, Sendable {
 
     var usesEmbeddedBackend: Bool {
         backend.mode?.lowercased() != "server"
+    }
+
+    var effectiveSecurity: Security {
+        security ?? Security(apiKeys: [], apiKeyEnv: "LLMRUNNER_API_KEY", maxRequestBodyBytes: 10_485_760)
+    }
+
+    var effectiveLogging: Logging {
+        logging ?? Logging(requests: true, level: "info")
     }
 
     private static func configPath(from arguments: [String]) -> String {

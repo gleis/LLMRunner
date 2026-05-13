@@ -7,29 +7,45 @@ final class HTTPServer: @unchecked Sendable {
     private let host: NWEndpoint.Host
     private let port: NWEndpoint.Port
     private let handler: Handler
+    private let requestLogging: Bool
+    private let maxRequestBodyBytes: Int
     private var listener: NWListener?
 
-    init(host: String, port: UInt16, handler: @escaping Handler) {
+    init(
+        host: String,
+        port: UInt16,
+        requestLogging: Bool = true,
+        maxRequestBodyBytes: Int = 10_485_760,
+        handler: @escaping Handler
+    ) {
         self.host = NWEndpoint.Host(host)
         self.port = NWEndpoint.Port(rawValue: port)!
+        self.requestLogging = requestLogging
+        self.maxRequestBodyBytes = maxRequestBodyBytes
         self.handler = handler
     }
 
     func start() async throws {
         let parameters = NWParameters.tcp
-        let listener = try NWListener(using: parameters, on: port)
+        parameters.requiredLocalEndpoint = .hostPort(host: host, port: port)
+        let listener = try NWListener(using: parameters)
         self.listener = listener
 
-        listener.newConnectionHandler = { [handler] connection in
+        listener.newConnectionHandler = { [handler, requestLogging, maxRequestBodyBytes] connection in
             connection.start(queue: .global(qos: .userInitiated))
 
             Task {
-                await Self.handle(connection: connection, handler: handler)
+                await Self.handle(
+                    connection: connection,
+                    requestLogging: requestLogging,
+                    maxRequestBodyBytes: maxRequestBodyBytes,
+                    handler: handler
+                )
             }
         }
 
         listener.start(queue: .global(qos: .userInitiated))
-        print("llmrunner listening on http://\(host):\(port)/v1")
+        AppLogger.info("llmrunner listening on http://\(host):\(port)/v1")
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             listener.stateUpdateHandler = { state in
@@ -49,11 +65,28 @@ final class HTTPServer: @unchecked Sendable {
         listener?.cancel()
     }
 
-    private static func handle(connection: NWConnection, handler: @escaping Handler) async {
+    private static func handle(
+        connection: NWConnection,
+        requestLogging: Bool,
+        maxRequestBodyBytes: Int,
+        handler: @escaping Handler
+    ) async {
+        let started = Date()
+        var parsedRequest: HTTPRequest?
+        var statusCode = 400
+
+        defer {
+            if requestLogging, let request = parsedRequest {
+                AppLogger.request(request, statusCode: statusCode, duration: Date().timeIntervalSince(started))
+            }
+        }
+
         do {
-            let data = try await readRequestData(from: connection)
+            let data = try await readRequestData(from: connection, maxBodyBytes: maxRequestBodyBytes)
             let request = try parseRequest(data)
+            parsedRequest = request
             let response = await handler(request)
+            statusCode = response.statusCode
             if let streamBody = response.streamBody {
                 try await send(response.serializedHeaders(includeContentLength: false), to: connection)
                 for try await chunk in streamBody {
@@ -63,8 +96,9 @@ final class HTTPServer: @unchecked Sendable {
                 try await send(response.serialized(), to: connection)
             }
         } catch {
+            AppLogger.warning("request failed before routing: \(error.localizedDescription)")
             let response = HTTPResponse.json(
-                statusCode: 400,
+                statusCode: (error as? HTTPParseError)?.statusCode ?? 400,
                 object: [
                     "error": [
                         "message": error.localizedDescription,
@@ -78,7 +112,7 @@ final class HTTPServer: @unchecked Sendable {
         connection.cancel()
     }
 
-    private static func readRequestData(from connection: NWConnection) async throws -> Data {
+    private static func readRequestData(from connection: NWConnection, maxBodyBytes: Int) async throws -> Data {
         var buffer = Data()
         var expectedLength: Int?
 
@@ -95,6 +129,9 @@ final class HTTPServer: @unchecked Sendable {
                 let headerData = buffer[..<headerRange.lowerBound]
                 let headerText = String(decoding: headerData, as: UTF8.self)
                 let contentLength = contentLength(from: headerText)
+                if contentLength > maxBodyBytes {
+                    throw HTTPParseError.requestBodyTooLarge(maxBytes: maxBodyBytes)
+                }
                 expectedLength = headerEnd + contentLength
             }
 
@@ -188,12 +225,21 @@ enum HTTPParseError: LocalizedError {
     case missingHeaders
     case missingRequestLine
     case invalidRequestLine
+    case requestBodyTooLarge(maxBytes: Int)
 
     var errorDescription: String? {
         switch self {
         case .missingHeaders: "The request did not include HTTP headers."
         case .missingRequestLine: "The request did not include a request line."
         case .invalidRequestLine: "The request line is invalid."
+        case .requestBodyTooLarge(let maxBytes): "The request body exceeds the configured limit of \(maxBytes) bytes."
+        }
+    }
+
+    var statusCode: Int {
+        switch self {
+        case .requestBodyTooLarge: 413
+        default: 400
         }
     }
 }

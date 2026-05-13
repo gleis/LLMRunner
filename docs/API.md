@@ -8,7 +8,14 @@ Default base URL:
 http://127.0.0.1:8080/v1
 ```
 
-Authentication is not enforced yet. If a client requires an API key, use any non-empty string.
+Authentication is optional. If no API key is configured, clients can use any non-empty API key. If `LLMRUNNER_API_KEY` or `security.apiKeys` is configured, all `/v1/*` endpoints require a matching key. `/health` and `/v1/health` stay unauthenticated for local service checks.
+
+Accepted auth headers:
+
+```text
+Authorization: Bearer <key>
+x-api-key: <key>
+```
 
 ## Endpoints
 
@@ -204,7 +211,7 @@ Embedded mode computes embeddings through `libllama`. Embedding support depends 
 
 ## Errors
 
-LLMRunner returns OpenAI-style JSON errors for routing, validation, model lookup, and startup failures. Invalid request bodies return `400`. Missing models return `404`. Backend load/generation failures return `503`.
+LLMRunner returns OpenAI-style JSON errors for routing, authentication, validation, model lookup, and startup failures. Invalid request bodies return `400`. Missing or invalid API keys return `401`. Missing models return `404`. Request bodies over `security.maxRequestBodyBytes` return `413`. Backend load/generation failures return `503`.
 
 Unknown route:
 
@@ -228,13 +235,25 @@ Backend startup failure:
 }
 ```
 
+Authentication failure:
+
+```json
+{
+  "error": {
+    "message": "Missing or invalid API key.",
+    "type": "invalid_request_error",
+    "code": "invalid_api_key"
+  }
+}
+```
+
 ## Client Setup
 
 Use an OpenAI-compatible SDK with:
 
 ```text
 base_url: http://127.0.0.1:8080/v1
-api_key: any non-empty string
+api_key: local, or your configured API key if auth is enabled
 ```
 
 Python example:

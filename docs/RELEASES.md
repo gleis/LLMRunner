@@ -35,6 +35,8 @@ Checklist:
 - Pull or reuse a small GGUF model with `dist/llmrunner models pull tiny`.
 - Verify `dist/llmrunner models search tiny` shows recommended files.
 - Verify `curl http://127.0.0.1:8080/v1/models`.
+- Verify API key auth with `LLMRUNNER_API_KEY` set.
+- Verify `dist/llmrunner logs --lines 20` shows startup and request logs.
 - Verify one chat completion.
 - Verify one streaming chat completion with `"stream": true`.
 - Verify one text completion.

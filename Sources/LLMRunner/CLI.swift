@@ -14,6 +14,8 @@ enum CLI {
             try stop()
         case "status":
             try await status(arguments: arguments)
+        case "logs":
+            try await logs(arguments: arguments)
         case "models":
             try await ModelsCLI.run(arguments: arguments)
         case "help", "--help", "-h":
@@ -42,10 +44,16 @@ enum CLI {
         try writePID(getpid())
 
         let config = try AppConfig.loadOrCreate(arguments: arguments)
+        logStartupSecurityState(config)
         let supervisor = ModelSupervisor(config: config)
         let embeddedBackend = EmbeddedLlamaBackend()
         let service = OpenAIService(config: config, supervisor: supervisor, embeddedBackend: embeddedBackend)
-        let server = HTTPServer(host: config.server.host, port: config.server.port) { request in
+        let server = HTTPServer(
+            host: config.server.host,
+            port: config.server.port,
+            requestLogging: config.effectiveLogging.requests,
+            maxRequestBodyBytes: config.effectiveSecurity.maxRequestBodyBytes ?? 10_485_760
+        ) { request in
             await service.handle(request)
         }
 
@@ -78,6 +86,7 @@ enum CLI {
         try writePID(process.processIdentifier)
         print("Started LLMRunner with pid \(process.processIdentifier).")
         print("Logs: \(RuntimePaths.logFile.path)")
+        print("Errors: \(RuntimePaths.errorLogFile.path)")
     }
 
     private static func stop() throws {
@@ -97,6 +106,25 @@ enum CLI {
             print("Stopped LLMRunner pid \(pid).")
         } else {
             throw CLIError.processSignalFailed(pid)
+        }
+    }
+
+    private static func logs(arguments: [String]) async throws {
+        let values = Array(arguments.dropFirst())
+        let showErrors = values.contains("--errors") || values.contains("--error")
+        let follow = values.contains("--follow") || values.contains("-f")
+        let lineCount = Int(optionValue("--lines", in: values) ?? "100") ?? 100
+        let url = showErrors ? RuntimePaths.errorLogFile : RuntimePaths.logFile
+
+        if !FileManager.default.fileExists(atPath: url.path) {
+            print("No log file at \(url.path)")
+            return
+        }
+
+        printTail(of: url, lines: lineCount)
+
+        if follow {
+            try await followLog(url)
         }
     }
 
@@ -163,6 +191,7 @@ enum CLI {
           llmrunner start [--config path]
           llmrunner stop
           llmrunner status [--config path]
+          llmrunner logs [--lines 100] [--follow] [--errors]
           llmrunner models list [--config path]
           llmrunner models search <query> [--limit 10]
           llmrunner models files <huggingface-repo>   # marks the recommended GGUF with *
@@ -173,6 +202,77 @@ enum CLI {
           llmrunner models pull <id> --url <url> [--config path]
           llmrunner models delete <id> [--config path]
         """)
+    }
+
+    private static func optionValue(_ name: String, in arguments: [String]) -> String? {
+        for (index, argument) in arguments.enumerated() {
+            if argument == name, index + 1 < arguments.count {
+                return arguments[index + 1]
+            }
+
+            if argument.hasPrefix("\(name)=") {
+                return String(argument.dropFirst(name.count + 1))
+            }
+        }
+
+        return nil
+    }
+
+    private static func logStartupSecurityState(_ config: AppConfig) {
+        let boundLocally = ["127.0.0.1", "localhost", "::1"].contains(config.server.host.lowercased())
+        let authEnabled = hasConfiguredAPIKey(config)
+
+        if authEnabled {
+            AppLogger.info("API key authentication enabled")
+        } else {
+            AppLogger.warning("API key authentication disabled")
+        }
+
+        if !boundLocally && !authEnabled {
+            AppLogger.warning("server host \(config.server.host) is not localhost and no API key is configured")
+        }
+    }
+
+    private static func hasConfiguredAPIKey(_ config: AppConfig) -> Bool {
+        let security = config.effectiveSecurity
+        if security.apiKeys.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            return true
+        }
+
+        guard
+            let envName = security.apiKeyEnv?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !envName.isEmpty,
+            let value = ProcessInfo.processInfo.environment[envName]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        else {
+            return false
+        }
+
+        return !value.isEmpty
+    }
+
+    private static func printTail(of url: URL, lines: Int) {
+        guard let text = try? String(contentsOf: url, encoding: .utf8), !text.isEmpty else {
+            return
+        }
+
+        let output = text.split(separator: "\n", omittingEmptySubsequences: false)
+            .suffix(max(lines, 0))
+            .joined(separator: "\n")
+        print(output)
+    }
+
+    private static func followLog(_ url: URL) async throws {
+        let handle = try FileHandle(forReadingFrom: url)
+        try handle.seekToEnd()
+
+        while true {
+            let data = handle.readDataToEndOfFile()
+            if !data.isEmpty, let text = String(data: data, encoding: .utf8) {
+                print(text, terminator: "")
+            }
+
+            try await Task.sleep(nanoseconds: 500_000_000)
+        }
     }
 }
 
