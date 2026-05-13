@@ -83,6 +83,7 @@ enum HTTPStatus {
         case 405: "Method Not Allowed"
         case 409: "Conflict"
         case 500: "Internal Server Error"
+        case 501: "Not Implemented"
         case 502: "Bad Gateway"
         case 503: "Service Unavailable"
         case 504: "Gateway Timeout"

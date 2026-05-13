@@ -17,9 +17,9 @@ Authentication is not enforced yet. If a client requires an API key, use any non
 | `GET` | `/health` | Service health check. |
 | `GET` | `/v1/health` | Versioned health check. |
 | `GET` | `/v1/models` | Lists configured local models. |
-| `POST` | `/v1/chat/completions` | Starts the requested model if needed, then proxies to `llama-server`. |
-| `POST` | `/v1/completions` | Starts the requested model if needed, then proxies to `llama-server`. |
-| `POST` | `/v1/embeddings` | Starts the requested model if needed, then proxies to `llama-server`. |
+| `POST` | `/v1/chat/completions` | Starts the requested model if needed, then generates through the configured backend. Embedded mode supports this route. |
+| `POST` | `/v1/completions` | Available in `backend.mode: "server"` by proxying to `llama-server`. |
+| `POST` | `/v1/embeddings` | Available in `backend.mode: "server"` by proxying to `llama-server`. |
 
 ## Model Selection
 
@@ -27,7 +27,7 @@ For proxied requests, LLMRunner reads the JSON `model` field.
 
 If `model` matches an entry in `~/.llmrunner/config.json`, that model is loaded. If the field is omitted or unknown, LLMRunner falls back to `defaultModel`, then the first configured model.
 
-Only one backend model process is kept active at a time. Requesting a different model stops the current `llama-server` process and starts a new one.
+Only one embedded model is kept active at a time. Requesting a different model unloads the current embedded model and loads the requested one. In server mode, LLMRunner stops the current `llama-server` process and starts a new one.
 
 ## Health
 
@@ -98,7 +98,7 @@ curl http://127.0.0.1:8080/v1/chat/completions \
   }'
 ```
 
-LLMRunner forwards the request body to the active backend. Response shape is produced by `llama-server`, for example:
+In embedded mode, LLMRunner returns an OpenAI-style response. In server mode, response shape is produced by `llama-server`.
 
 ```json
 {
@@ -142,7 +142,7 @@ curl http://127.0.0.1:8080/v1/completions \
   }'
 ```
 
-The request and response are proxied to `llama-server`.
+This route is not implemented by the embedded backend yet. Set `backend.mode` to `server` to proxy it to `llama-server`.
 
 ## Embeddings
 
@@ -161,7 +161,7 @@ curl http://127.0.0.1:8080/v1/embeddings \
   }'
 ```
 
-The request and response are proxied to `llama-server`. Embedding support depends on the selected model and backend configuration.
+This route is not implemented by the embedded backend yet. Set `backend.mode` to `server` to proxy it to `llama-server`. Embedding support depends on the selected model and backend configuration.
 
 ## Errors
 

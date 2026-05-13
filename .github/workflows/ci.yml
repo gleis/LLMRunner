@@ -17,6 +17,9 @@ jobs:
       - name: Show Swift version
         run: swift --version
 
+      - name: Install llama.cpp
+        run: brew install llama.cpp
+
       - name: Build release
         run: swift build -c release
 

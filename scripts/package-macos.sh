@@ -51,7 +51,11 @@ cd "$ROOT_DIR"
 swift build -c release
 
 rm -rf "$APP_PATH"
-mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources/bin" "$APP_PATH/Contents/Resources/lib"
+mkdir -p \
+  "$APP_PATH/Contents/MacOS" \
+  "$APP_PATH/Contents/Resources/bin" \
+  "$APP_PATH/Contents/Resources/lib" \
+  "$APP_PATH/Contents/Resources/libexec"
 
 cp "$ROOT_DIR/.build/release/llmrunner" "$APP_PATH/Contents/MacOS/llmrunner"
 cp "$LLAMA_SERVER_PATH" "$APP_PATH/Contents/Resources/bin/llama-server"
@@ -67,6 +71,10 @@ fi
 
 if [[ -n "$GGML_PREFIX" && -d "$GGML_PREFIX/lib" ]]; then
   cp -R "$GGML_PREFIX"/lib/libggml*.dylib "$APP_PATH/Contents/Resources/lib/"
+fi
+
+if [[ -n "$GGML_PREFIX" && -d "$GGML_PREFIX/libexec" ]]; then
+  cp -R "$GGML_PREFIX"/libexec/libggml*.so "$APP_PATH/Contents/Resources/libexec/"
 fi
 
 cat > "$APP_PATH/Contents/Info.plist" <<PLIST
@@ -101,7 +109,26 @@ exec "$SCRIPT_DIR/LLMRunner.app/Contents/MacOS/llmrunner" "$@"
 SH
 chmod +x "$DIST_DIR/llmrunner"
 
+if command -v install_name_tool >/dev/null 2>&1; then
+  install_name_tool \
+    -change /opt/homebrew/opt/llama.cpp/lib/libllama.0.dylib @executable_path/../Resources/lib/libllama.0.dylib \
+    -change /opt/homebrew/opt/ggml/lib/libggml.0.dylib @executable_path/../Resources/lib/libggml.0.dylib \
+    -change /opt/homebrew/opt/ggml/lib/libggml-base.0.dylib @executable_path/../Resources/lib/libggml-base.0.dylib \
+    "$APP_PATH/Contents/MacOS/llmrunner"
+
+  while IFS= read -r dylib; do
+    install_name_tool \
+      -change /opt/homebrew/opt/ggml/lib/libggml.0.dylib @loader_path/libggml.0.dylib \
+      -change /opt/homebrew/opt/ggml/lib/libggml-base.0.dylib @loader_path/libggml-base.0.dylib \
+      "$dylib" || true
+  done < <(find "$APP_PATH/Contents/Resources/lib" -type f -name '*.dylib')
+fi
+
 if [[ "$CODESIGN" -eq 1 ]] && command -v codesign >/dev/null 2>&1; then
+  while IFS= read -r binary; do
+    codesign --force --sign - "$binary"
+  done < <(find "$APP_PATH/Contents" -type f \( -name 'llmrunner' -o -name 'llama-server' -o -name '*.dylib' -o -name '*.so' \))
+
   codesign --force --deep --sign - "$APP_PATH"
 fi
 

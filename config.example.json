@@ -4,20 +4,13 @@
     "port": 8080
   },
   "backend": {
+    "mode": "embedded",
     "executable": "llama-server",
     "host": "127.0.0.1",
     "port": 8081,
     "extraArguments": ["--jinja"],
     "startupTimeoutSeconds": 60
   },
-  "defaultModel": "local-default",
-  "models": [
-    {
-      "id": "local-default",
-      "path": "~/Models/model.gguf",
-      "contextSize": 8192,
-      "gpuLayers": 99,
-      "arguments": []
-    }
-  ]
+  "defaultModel": "",
+  "models": []
 }

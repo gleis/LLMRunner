@@ -7,6 +7,7 @@ struct AppConfig: Codable, Sendable {
     }
 
     struct Backend: Codable, Sendable {
+        var mode: String?
         var executable: String
         var host: String
         var port: UInt16
@@ -63,6 +64,7 @@ struct AppConfig: Codable, Sendable {
         AppConfig(
             server: Server(host: "127.0.0.1", port: 8080),
             backend: Backend(
+                mode: "embedded",
                 executable: "llama-server",
                 host: "127.0.0.1",
                 port: 8081,
@@ -96,6 +98,10 @@ struct AppConfig: Codable, Sendable {
         }
 
         return models.first
+    }
+
+    var usesEmbeddedBackend: Bool {
+        backend.mode?.lowercased() != "server"
     }
 
     private static func configPath(from arguments: [String]) -> String {

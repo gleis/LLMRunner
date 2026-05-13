@@ -4,7 +4,7 @@ LLMRunner can package third-party runtime components into `dist/LLMRunner.app`.
 
 ## llama.cpp
 
-The bundled `llama-server` binary comes from llama.cpp when you run:
+The bundled `libllama` dynamic libraries and optional `llama-server` binary come from llama.cpp when you run:
 
 ```sh
 scripts/package-macos.sh --llama-server /path/to/llama-server

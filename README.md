@@ -1,16 +1,17 @@
 # LLMRunner
 
-LLMRunner is a no-GUI macOS service that exposes an OpenAI-compatible HTTP API and supervises a local `llama-server` process for GGUF models. It is meant to run as a command-line service during development and as a `launchd` user agent when you want it always available.
+LLMRunner is a no-GUI macOS service that exposes an OpenAI-compatible HTTP API for local GGUF models. It can run models in-process through embedded `libllama`, or proxy to `llama-server` as a fallback backend.
 
 > Alpha status: LLMRunner is useful today for local development and experiments, but it is not yet a polished consumer installer. The API binds to localhost by default and does not enforce authentication.
 
 It is intentionally small:
 
 - `GET /v1/models` lists configured local models.
-- `POST /v1/chat/completions`, `/v1/completions`, and `/v1/embeddings` start the requested model if needed and proxy the request to `llama-server`.
+- `POST /v1/chat/completions` starts the requested model if needed and generates with embedded `libllama` by default.
+- `POST /v1/completions` and `/v1/embeddings` are still available through `llama-server` backend mode.
 - `GET /health` returns service health.
 
-The actual inference engine is `llama-server` from llama.cpp. LLMRunner owns model selection, process lifecycle, and the stable OpenAI-compatible front door.
+The default inference engine is embedded `libllama` from llama.cpp. LLMRunner owns model selection, model loading, and the stable OpenAI-compatible front door.
 
 ## Quickstart
 
@@ -47,9 +48,31 @@ Try the example chatbot:
 python3 examples/python_chatbot.py --model smollm2-135m
 ```
 
-## Backend
+## Backends
 
-LLMRunner looks for `backend.executable` in a bundle-friendly order:
+LLMRunner supports two backend modes:
+
+```json
+{
+  "backend": {
+    "mode": "embedded"
+  }
+}
+```
+
+`embedded` is the default and runs chat completions in-process through `libllama`.
+
+```json
+{
+  "backend": {
+    "mode": "server"
+  }
+}
+```
+
+`server` starts and proxies to `llama-server`. Use this for `/v1/completions`, `/v1/embeddings`, or as a fallback while embedded support matures.
+
+In server mode, LLMRunner looks for `backend.executable` in a bundle-friendly order:
 
 1. `LLMRunner.app/Contents/Resources/llama-server`
 2. `LLMRunner.app/Contents/Resources/bin/llama-server`
@@ -63,7 +86,7 @@ For development, the quickest backend install is:
 brew install llama.cpp
 ```
 
-For distribution, bundle the `llama-server` binary in the app instead of asking users to install Homebrew.
+For distribution, the package script bundles `libllama`, `ggml`, ggml backend plugins, and `llama-server`.
 
 ## Configure
 
@@ -74,11 +97,11 @@ mkdir -p ~/.llmrunner
 cp config.example.json ~/.llmrunner/config.json
 ```
 
-Then edit:
+Then pull a model:
 
-- `models[0].id`: the model name clients will send, for example `qwen3-8b`.
-- `models[0].path`: path to the local `.gguf` file.
-- `backend.executable`: usually `llama-server`. You can also use an absolute path for local testing.
+```sh
+llmrunner models pull tiny
+```
 
 ## Run
 
@@ -180,6 +203,9 @@ The app bundle contains:
 
 - `Contents/MacOS/llmrunner`
 - `Contents/Resources/bin/llama-server`
+- `Contents/Resources/lib/libllama*.dylib`
+- `Contents/Resources/lib/libggml*.dylib`
+- `Contents/Resources/libexec/libggml*.so`
 - `Contents/Resources/config.example.json`
 
 The package script also creates a convenience CLI wrapper at:
@@ -212,7 +238,9 @@ Only one model process is kept active at a time. If a request asks for a differe
 - macOS only.
 - GGUF models only.
 - No API authentication yet.
-- One active backend model process at a time.
+- Embedded backend currently supports `/v1/chat/completions` only.
+- `/v1/completions` and `/v1/embeddings` still require `backend.mode: "server"`.
+- One active embedded model at a time.
 - Public binary releases still need Developer ID signing and notarization.
 - The package script currently expects Homebrew-provided `llama.cpp`/`ggml` libraries on the build machine.
 

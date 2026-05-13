@@ -3,10 +3,12 @@ import Foundation
 struct OpenAIService: Sendable {
     private let config: AppConfig
     private let supervisor: ModelSupervisor
+    private let embeddedBackend: EmbeddedLlamaBackend
 
-    init(config: AppConfig, supervisor: ModelSupervisor) {
+    init(config: AppConfig, supervisor: ModelSupervisor, embeddedBackend: EmbeddedLlamaBackend) {
         self.config = config
         self.supervisor = supervisor
+        self.embeddedBackend = embeddedBackend
     }
 
     func handle(_ request: HTTPRequest) async -> HTTPResponse {
@@ -16,9 +18,26 @@ struct OpenAIService: Sendable {
                 return .json(object: ["status": "ok"])
             case ("GET", "/v1/models"):
                 return modelsResponse()
-            case ("POST", "/v1/chat/completions"),
-                 ("POST", "/v1/completions"),
+            case ("POST", "/v1/chat/completions"):
+                if config.usesEmbeddedBackend {
+                    return try await embeddedChatCompletion(request)
+                }
+
+                return try await proxy(request)
+            case ("POST", "/v1/completions"),
                  ("POST", "/v1/embeddings"):
+                if config.usesEmbeddedBackend {
+                    return .json(
+                        statusCode: 501,
+                        object: [
+                            "error": [
+                                "message": "\(request.querylessPath) is not implemented by the embedded backend yet. Set backend.mode to server to proxy this route to llama-server.",
+                                "type": "server_error"
+                            ]
+                        ]
+                    )
+                }
+
                 return try await proxy(request)
             default:
                 return .json(
@@ -42,6 +61,51 @@ struct OpenAIService: Sendable {
                 ]
             )
         }
+    }
+
+    private func embeddedChatCompletion(_ request: HTTPRequest) async throws -> HTTPResponse {
+        let completionRequest = try ChatCompletionRequest(json: request.jsonObject())
+
+        if completionRequest.stream {
+            return .json(
+                statusCode: 501,
+                object: [
+                    "error": [
+                        "message": "Streaming is not implemented by the embedded backend yet.",
+                        "type": "server_error"
+                    ]
+                ]
+            )
+        }
+
+        guard let model = config.model(id: completionRequest.model) else {
+            throw BackendError.missingModel
+        }
+
+        let result = try await embeddedBackend.generateChat(model: model, request: completionRequest)
+        let created = Int(Date().timeIntervalSince1970)
+
+        return .json(object: [
+            "id": result.id,
+            "object": "chat.completion",
+            "created": created,
+            "model": result.model,
+            "choices": [
+                [
+                    "index": 0,
+                    "message": [
+                        "role": "assistant",
+                        "content": result.content
+                    ],
+                    "finish_reason": "stop"
+                ] as [String: Any]
+            ],
+            "usage": [
+                "prompt_tokens": NSNull(),
+                "completion_tokens": NSNull(),
+                "total_tokens": NSNull()
+            ]
+        ])
     }
 
     private func modelsResponse() -> HTTPResponse {

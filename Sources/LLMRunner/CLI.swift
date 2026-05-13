@@ -43,7 +43,8 @@ enum CLI {
 
         let config = try AppConfig.loadOrCreate(arguments: arguments)
         let supervisor = ModelSupervisor(config: config)
-        let service = OpenAIService(config: config, supervisor: supervisor)
+        let embeddedBackend = EmbeddedLlamaBackend()
+        let service = OpenAIService(config: config, supervisor: supervisor, embeddedBackend: embeddedBackend)
         let server = HTTPServer(host: config.server.host, port: config.server.port) { request in
             await service.handle(request)
         }
