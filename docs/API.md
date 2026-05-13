@@ -17,15 +17,16 @@ Authentication is not enforced yet. If a client requires an API key, use any non
 | `GET` | `/health` | Service health check. |
 | `GET` | `/v1/health` | Versioned health check. |
 | `GET` | `/v1/models` | Lists configured local models. |
+| `GET` | `/v1/models/{model}` | Returns one configured local model. |
 | `POST` | `/v1/chat/completions` | Starts the requested model if needed, then generates through the configured backend. Embedded mode supports normal and streaming responses. |
-| `POST` | `/v1/completions` | Generates raw prompt completions. Embedded mode supports non-streaming responses. |
+| `POST` | `/v1/completions` | Generates raw prompt completions. Embedded mode supports normal and streaming responses. |
 | `POST` | `/v1/embeddings` | Computes embeddings. Embedded support depends on model compatibility. |
 
 ## Model Selection
 
-For proxied requests, LLMRunner reads the JSON `model` field.
+LLMRunner reads the JSON `model` field for generation and embedding requests.
 
-If `model` matches an entry in `~/.llmrunner/config.json`, that model is loaded. If the field is omitted or unknown, LLMRunner falls back to `defaultModel`, then the first configured model.
+If `model` matches an entry in `~/.llmrunner/config.json`, that model is loaded. If the field is omitted, LLMRunner falls back to `defaultModel`, then the first configured model. If the field is present but does not match a configured model, LLMRunner returns a `404` `model_not_found` error.
 
 Only one embedded model is kept active at a time. Requesting a different model unloads the current embedded model and loads the requested one. In server mode, LLMRunner stops the current `llama-server` process and starts a new one.
 
@@ -75,6 +76,12 @@ Response:
     }
   ]
 }
+```
+
+Get a single model:
+
+```http
+GET /v1/models/smollm2-135m
 ```
 
 ## Chat Completions
@@ -158,7 +165,23 @@ curl http://127.0.0.1:8080/v1/completions \
   }'
 ```
 
-The embedded backend accepts a string `prompt` and returns an OpenAI-style text completion response. Completion streaming is not implemented yet.
+The embedded backend accepts a string `prompt` and returns an OpenAI-style text completion response.
+
+For streaming, set:
+
+```json
+{
+  "stream": true
+}
+```
+
+The response uses server-sent events:
+
+```text
+data: {"id":"cmpl-...","object":"text_completion","choices":[...]}
+
+data: [DONE]
+```
 
 ## Embeddings
 
@@ -181,7 +204,7 @@ Embedded mode computes embeddings through `libllama`. Embedding support depends 
 
 ## Errors
 
-LLMRunner returns OpenAI-style JSON errors for routing and startup failures.
+LLMRunner returns OpenAI-style JSON errors for routing, validation, model lookup, and startup failures. Invalid request bodies return `400`. Missing models return `404`. Backend load/generation failures return `503`.
 
 Unknown route:
 

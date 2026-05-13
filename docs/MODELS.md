@@ -16,6 +16,8 @@ Search Hugging Face:
 llmrunner models search qwen3
 ```
 
+Search results include download/like counts, the number of GGUF files in each repo, and a recommended GGUF file when one can be selected automatically.
+
 Pull a Hugging Face GGUF repo:
 
 ```sh
@@ -34,11 +36,19 @@ Prefer a quantization:
 llmrunner models pull Qwen/Qwen3-0.6B-GGUF --quant Q4_K_M
 ```
 
+Pull an exact file when you already know which GGUF you want:
+
+```sh
+llmrunner models pull Qwen/Qwen3-0.6B-GGUF --file qwen3-0.6b-q4_k_m.gguf
+```
+
 List GGUF files in a repo:
 
 ```sh
 llmrunner models files unsloth/SmolLM2-135M-Instruct-GGUF
 ```
+
+The recommended file is marked with `*`. File rows include the detected quantization and size when Hugging Face exposes file metadata.
 
 Use a direct URL when needed:
 
@@ -79,6 +89,10 @@ Searches Hugging Face for GGUF model repos, picks the highest-ranked result with
 `llmrunner models pull local-id --repo owner/repo`
 
 Uses `local-id` in LLMRunner config while downloading from the specified repo.
+
+`llmrunner models pull owner/repo --file model.gguf`
+
+Downloads a specific GGUF file from the repo.
 
 ## Quantization Choice
 

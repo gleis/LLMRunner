@@ -68,10 +68,15 @@ enum ModelsCLI {
         }
 
         for model in results {
-            let ggufCount = model.siblings.filter { $0.lowercased().hasSuffix(".gguf") }.count
+            let detailedModel = (try? await HuggingFaceHub.modelInfo(repoID: model.id)) ?? model
+            let ggufFiles = detailedModel.files.filter { $0.name.lowercased().hasSuffix(".gguf") }
             let downloads = model.downloads.map(String.init) ?? "-"
             let likes = model.likes.map(String.init) ?? "-"
-            print("\(model.id)  downloads:\(downloads) likes:\(likes) gguf:\(ggufCount)")
+            let recommendation = HuggingFaceHub.recommendedFile(for: detailedModel)
+                .map(recommendationDescription(file:))
+                ?? "no recommended GGUF"
+            print("\(model.id)  downloads:\(downloads) likes:\(likes) gguf:\(ggufFiles.count)")
+            print("  recommended: \(recommendation)")
         }
     }
 
@@ -81,15 +86,24 @@ enum ModelsCLI {
             throw CLIError.missingArgument("repo id")
         }
 
-        let files = try await HuggingFaceHub.ggufFiles(repoID: repoID)
+        let files = try await HuggingFaceHub.ggufFileInfos(repoID: repoID)
 
         if files.isEmpty {
             print("No GGUF files found in \(repoID).")
             return
         }
 
+        let recommended = HuggingFaceHub.recommendedFile(for: HuggingFaceModel(
+            id: repoID,
+            downloads: nil,
+            likes: nil,
+            siblings: files.map(\.name),
+            files: files
+        ))
+
         for file in files {
-            print(file)
+            let marker = file.name == recommended?.name ? "*" : " "
+            print("\(marker) \(fileDescription(file: file))")
         }
     }
 
@@ -120,6 +134,9 @@ enum ModelsCLI {
 
         print(resolution.message)
         print("Pulling \(id) from \(sourceURL.absoluteString)")
+        if let details = resolution.details {
+            print("Selected \(details)")
+        }
         try await download(from: sourceURL, to: destination)
 
         let model = AppConfig.Model(
@@ -144,13 +161,13 @@ enum ModelsCLI {
         print("Installed \(id) at \(destination.path)")
     }
 
-    private static func resolvePullSource(requested: String, arguments: [String]) async throws -> (id: String, url: URL, message: String) {
+    private static func resolvePullSource(requested: String, arguments: [String]) async throws -> (id: String, url: URL, message: String, details: String?) {
         if let urlValue = optionValue("--url", in: arguments) {
             guard let sourceURL = URL(string: urlValue) else {
                 throw CLIError.invalidURL(urlValue)
             }
 
-            return (id: requested, url: sourceURL, message: "Using direct URL.")
+            return (id: requested, url: sourceURL, message: "Using direct URL.", details: nil)
         }
 
         let quantization = optionValue("--quant", in: arguments)
@@ -161,7 +178,8 @@ enum ModelsCLI {
             return (
                 id: safeModelID(requested),
                 url: selection.downloadURL,
-                message: "Resolved \(repoID) -> \(selection.filename)"
+                message: "Resolved \(repoID) -> \(selection.filename)",
+                details: selectionDescription(selection)
             )
         }
 
@@ -174,7 +192,8 @@ enum ModelsCLI {
             return (
                 id: catalogEntry.id,
                 url: selection.downloadURL,
-                message: "Resolved alias '\(requested)' -> \(selection.repoID) / \(selection.filename)"
+                message: "Resolved alias '\(requested)' -> \(selection.repoID) / \(selection.filename)",
+                details: selectionDescription(selection)
             )
         }
 
@@ -183,7 +202,8 @@ enum ModelsCLI {
             return (
                 id: safeModelID(requested.split(separator: "/").last.map(String.init) ?? requested),
                 url: selection.downloadURL,
-                message: "Resolved \(selection.repoID) -> \(selection.filename)"
+                message: "Resolved \(selection.repoID) -> \(selection.filename)",
+                details: selectionDescription(selection)
             )
         }
 
@@ -191,7 +211,8 @@ enum ModelsCLI {
         return (
             id: safeModelID(selection.repoID.split(separator: "/").last.map(String.init) ?? requested),
             url: selection.downloadURL,
-            message: "Resolved search '\(requested)' -> \(selection.repoID) / \(selection.filename)"
+            message: "Resolved search '\(requested)' -> \(selection.repoID) / \(selection.filename)",
+            details: selectionDescription(selection)
         )
     }
 
@@ -315,6 +336,26 @@ enum ModelsCLI {
         }
 
         return ByteCountFormatter.string(fromByteCount: size.int64Value, countStyle: .file)
+    }
+
+    private static func fileDescription(file: HuggingFaceFile) -> String {
+        let quantization = HuggingFaceHub.quantization(from: file.name) ?? "unknown quant"
+        let size = file.sizeBytes.map(byteCount) ?? "unknown size"
+        return "\(file.name)  \(quantization)  \(size)"
+    }
+
+    private static func recommendationDescription(file: HuggingFaceFile) -> String {
+        fileDescription(file: file)
+    }
+
+    private static func selectionDescription(_ selection: GGUFSelection) -> String {
+        let quantization = selection.quantization ?? "unknown quant"
+        let size = selection.sizeBytes.map(byteCount) ?? "unknown size"
+        return "\(selection.filename)  \(quantization)  \(size)"
+    }
+
+    private static func byteCount(_ size: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
     }
 }
 

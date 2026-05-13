@@ -156,11 +156,12 @@ llmrunner models search qwen3
 llmrunner models files Qwen/Qwen3-0.6B-GGUF
 llmrunner models pull tiny
 llmrunner models pull Qwen/Qwen3-0.6B-GGUF --quant Q4_K_M
+llmrunner models pull Qwen/Qwen3-0.6B-GGUF --file qwen3-0.6b-q4_k_m.gguf
 llmrunner models pull "smollm2 135m"
 llmrunner models delete qwen3-8b
 ```
 
-`models pull` can use built-in aliases, Hugging Face repo IDs, search phrases, or direct URLs. It downloads the selected GGUF file into `~/.llmrunner/models/<model-id>/`, adds it to `~/.llmrunner/config.json`, and makes it the default model if there is no default yet.
+`models search` and `models files` show GGUF counts, recommended files, quantization hints, and file sizes when Hugging Face exposes them. `models pull` can use built-in aliases, Hugging Face repo IDs, search phrases, specific GGUF filenames, or direct URLs. It downloads the selected GGUF file into `~/.llmrunner/models/<model-id>/`, adds it to `~/.llmrunner/config.json`, and makes it the default model if there is no default yet.
 
 Model search and pull details are in [docs/MODELS.md](docs/MODELS.md).
 
@@ -240,7 +241,7 @@ Only one model process is kept active at a time. If a request asks for a differe
 - GGUF models only.
 - No API authentication yet.
 - Embedded chat streaming is supported for `/v1/chat/completions`.
-- Completion streaming for `/v1/completions` is not implemented yet.
+- Embedded completion streaming is supported for `/v1/completions`.
 - Embedded embeddings depend on model compatibility; not every GGUF model is a good embedding model.
 - One active embedded model at a time.
 - Public binary releases still need Developer ID signing and notarization.

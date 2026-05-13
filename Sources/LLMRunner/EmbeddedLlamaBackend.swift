@@ -155,6 +155,47 @@ actor EmbeddedLlamaBackend {
         )
     }
 
+    func generateCompletionStream(model: AppConfig.Model, request: CompletionRequest, state: EmbeddedStreamState) throws {
+        try ensureLoaded(model: model)
+
+        guard let engine else {
+            throw EmbeddedLlamaError.notLoaded
+        }
+
+        let options = generationOptions(
+            maxTokens: request.maxTokens,
+            temperature: request.temperature,
+            topP: request.topP,
+            topK: request.topK,
+            seed: request.seed
+        )
+
+        let retainedState = Unmanaged.passRetained(state)
+        defer {
+            retainedState.release()
+        }
+
+        var error: UnsafeMutablePointer<CChar>?
+        let output = llmr_generate_completion(
+            engine,
+            request.prompt,
+            options,
+            embeddedTokenCallback,
+            retainedState.toOpaque(),
+            &error
+        )
+
+        if let output {
+            llmr_string_free(output)
+        }
+
+        if let error {
+            let message = String(cString: error)
+            llmr_string_free(error)
+            throw EmbeddedLlamaError.generationFailed(message)
+        }
+    }
+
     func embed(model: AppConfig.Model, input: String) throws -> [Float] {
         let path = NSString(string: model.path).expandingTildeInPath
         let contextSize = Int32(model.contextSize ?? 8192)

@@ -18,6 +18,9 @@ struct OpenAIService: Sendable {
                 return .json(object: ["status": "ok"])
             case ("GET", "/v1/models"):
                 return modelsResponse()
+            case ("GET", let path) where path.hasPrefix("/v1/models/"):
+                let id = String(path.dropFirst("/v1/models/".count)).removingPercentEncoding ?? ""
+                return modelResponse(id: id)
             case ("POST", "/v1/chat/completions"):
                 if config.usesEmbeddedBackend {
                     return try await embeddedChatCompletion(request)
@@ -48,15 +51,7 @@ struct OpenAIService: Sendable {
                 )
             }
         } catch {
-            return .json(
-                statusCode: 503,
-                object: [
-                    "error": [
-                        "message": error.localizedDescription,
-                        "type": "server_error"
-                    ]
-                ]
-            )
+            return Self.errorResponse(for: error)
         }
     }
 
@@ -64,17 +59,11 @@ struct OpenAIService: Sendable {
         let completionRequest = try ChatCompletionRequest(json: request.jsonObject())
 
         if completionRequest.stream {
-            guard let model = config.model(id: completionRequest.model) else {
-                throw BackendError.missingModel
-            }
-
+            let model = try model(for: completionRequest.model)
             return embeddedChatStream(model: model, request: completionRequest)
         }
 
-        guard let model = config.model(id: completionRequest.model) else {
-            throw BackendError.missingModel
-        }
-
+        let model = try model(for: completionRequest.model)
         let result = try await embeddedBackend.generateChat(model: model, request: completionRequest)
         let created = Int(Date().timeIntervalSince1970)
 
@@ -182,21 +171,11 @@ struct OpenAIService: Sendable {
         let completionRequest = try CompletionRequest(json: request.jsonObject())
 
         if completionRequest.stream {
-            return .json(
-                statusCode: 501,
-                object: [
-                    "error": [
-                        "message": "Streaming is implemented for /v1/chat/completions. Completion streaming is not implemented yet.",
-                        "type": "server_error"
-                    ]
-                ]
-            )
+            let model = try model(for: completionRequest.model)
+            return embeddedCompletionStream(model: model, request: completionRequest)
         }
 
-        guard let model = config.model(id: completionRequest.model) else {
-            throw BackendError.missingModel
-        }
-
+        let model = try model(for: completionRequest.model)
         let result = try await embeddedBackend.generateCompletion(model: model, request: completionRequest)
 
         return .json(object: [
@@ -220,13 +199,70 @@ struct OpenAIService: Sendable {
         ])
     }
 
+    private func embeddedCompletionStream(model: AppConfig.Model, request: CompletionRequest) -> HTTPResponse {
+        let id = "cmpl-\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
+        let created = Int(Date().timeIntervalSince1970)
+        let modelID = model.id
+        let backend = embeddedBackend
+
+        let stream = AsyncThrowingStream<Data, Error> { continuation in
+            let state = EmbeddedStreamState { token in
+                continuation.yield(Self.sseData(object: [
+                    "id": id,
+                    "object": "text_completion",
+                    "created": created,
+                    "model": modelID,
+                    "choices": [
+                        [
+                            "text": token,
+                            "index": 0,
+                            "logprobs": NSNull(),
+                            "finish_reason": NSNull()
+                        ] as [String: Any]
+                    ]
+                ]))
+            }
+
+            Task {
+                do {
+                    try await backend.generateCompletionStream(model: model, request: request, state: state)
+                    continuation.yield(Self.sseData(object: [
+                        "id": id,
+                        "object": "text_completion",
+                        "created": created,
+                        "model": modelID,
+                        "choices": [
+                            [
+                                "text": "",
+                                "index": 0,
+                                "logprobs": NSNull(),
+                                "finish_reason": "stop"
+                            ] as [String: Any]
+                        ]
+                    ]))
+                    continuation.yield(Data("data: [DONE]\n\n".utf8))
+                    continuation.finish()
+                } catch {
+                    continuation.yield(Self.sseData(object: Self.errorObject(for: error)))
+                    continuation.yield(Data("data: [DONE]\n\n".utf8))
+                    continuation.finish()
+                }
+            }
+        }
+
+        return .stream(
+            headers: [
+                "Content-Type": "text/event-stream; charset=utf-8",
+                "Cache-Control": "no-cache"
+            ],
+            body: stream
+        )
+    }
+
     private func embeddedEmbeddings(_ request: HTTPRequest) async throws -> HTTPResponse {
         let embeddingRequest = try EmbeddingRequest(json: request.jsonObject())
 
-        guard let model = config.model(id: embeddingRequest.model) else {
-            throw BackendError.missingModel
-        }
-
+        let model = try model(for: embeddingRequest.model)
         let data = try await embeddingRequest.inputs.enumerated().asyncMap { index, input in
             let vector = try await embeddedBackend.embed(model: model, input: input)
             return [
@@ -263,11 +299,28 @@ struct OpenAIService: Sendable {
         ])
     }
 
+    private func modelResponse(id: String) -> HTTPResponse {
+        guard let model = config.models.first(where: { $0.id == id }) else {
+            return .json(statusCode: 404, object: [
+                "error": [
+                    "message": "Model '\(id)' was not found.",
+                    "type": "invalid_request_error",
+                    "code": "model_not_found"
+                ]
+            ])
+        }
+
+        return .json(object: [
+            "id": model.id,
+            "object": "model",
+            "created": 0,
+            "owned_by": "llmrunner"
+        ])
+    }
+
     private func proxy(_ request: HTTPRequest) async throws -> HTTPResponse {
         let requestedModel = try request.jsonObject()["model"] as? String
-        guard let model = config.model(id: requestedModel) else {
-            throw BackendError.missingModel
-        }
+        let model = try model(for: requestedModel)
 
         try await supervisor.ensureRunning(model: model)
 
@@ -306,10 +359,70 @@ struct OpenAIService: Sendable {
         )
     }
 
+    private func model(for requestedModel: String?) throws -> AppConfig.Model {
+        if let requestedModel, !requestedModel.isEmpty {
+            guard let model = config.models.first(where: { $0.id == requestedModel }) else {
+                throw OpenAIServiceError.modelNotFound(requestedModel)
+            }
+
+            return model
+        }
+
+        guard let model = config.model(id: nil) else {
+            throw BackendError.missingModel
+        }
+
+        return model
+    }
+
     private static func sseData(object: Any) -> Data {
         let json = (try? JSONSerialization.data(withJSONObject: object)) ?? Data("{}".utf8)
         let text = String(decoding: json, as: UTF8.self)
         return Data("data: \(text)\n\n".utf8)
+    }
+
+    private static func errorResponse(for error: Error) -> HTTPResponse {
+        let status: Int
+        let type: String
+        let code: String?
+
+        switch error {
+        case EmbeddedLlamaError.invalidRequest:
+            status = 400
+            type = "invalid_request_error"
+            code = "invalid_request"
+        case OpenAIServiceError.modelNotFound:
+            status = 404
+            type = "invalid_request_error"
+            code = "model_not_found"
+        case BackendError.missingModel:
+            status = 404
+            type = "invalid_request_error"
+            code = "model_not_found"
+        case is DecodingError:
+            status = 400
+            type = "invalid_request_error"
+            code = "invalid_json"
+        default:
+            status = 503
+            type = "server_error"
+            code = nil
+        }
+
+        return .json(statusCode: status, object: errorObject(for: error, type: type, code: code))
+    }
+
+    private static func errorObject(for error: Error, type: String = "server_error", code: String? = nil) -> [String: Any] {
+        var details: [String: Any] = [
+            "message": error.localizedDescription,
+            "type": type
+        ]
+
+        if let code {
+            details["code"] = code
+        }
+
+        return ["error": details]
     }
 }
 
@@ -317,8 +430,20 @@ private extension Sequence {
     func asyncMap<T>(_ transform: (Element) async throws -> T) async rethrows -> [T] {
         var values: [T] = []
         for element in self {
-            try await values.append(transform(element))
+            let value = try await transform(element)
+            values.append(value)
         }
         return values
+    }
+}
+
+private enum OpenAIServiceError: LocalizedError {
+    case modelNotFound(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .modelNotFound(let model):
+            return "Model '\(model)' was not found."
+        }
     }
 }

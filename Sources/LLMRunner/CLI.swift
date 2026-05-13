@@ -165,9 +165,10 @@ enum CLI {
           llmrunner status [--config path]
           llmrunner models list [--config path]
           llmrunner models search <query> [--limit 10]
-          llmrunner models files <huggingface-repo>
+          llmrunner models files <huggingface-repo>   # marks the recommended GGUF with *
           llmrunner models pull tiny
           llmrunner models pull <huggingface-repo> [--quant Q4_K_M]
+          llmrunner models pull <huggingface-repo> --file model.gguf
           llmrunner models pull <search query> [--quant Q4_K_M]
           llmrunner models pull <id> --url <url> [--config path]
           llmrunner models delete <id> [--config path]
