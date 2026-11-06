@@ -26,3 +26,4 @@ jobs:
           swift build -c release
           bash -n scripts/package-macos.sh
           python3 -m py_compile examples/python_chatbot.py
+          ruby -c Formula/llmrunner.rb

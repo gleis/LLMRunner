@@ -25,6 +25,12 @@ class Llmrunner < Formula
       system "cmake", "--build", "build", "--parallel"
       system "cmake", "--install", "build"
     end
+    system "install_name_tool", "-add_rpath", "@executable_path/../lib", libexec/"bin/llama-server"
+    Dir[libexec/"lib/*.dylib"].each do |library|
+      next if File.symlink?(library)
+
+      system "install_name_tool", "-add_rpath", "@loader_path", library
+    end
     ENV["PKG_CONFIG_PATH"] = "#{libexec}/lib/pkgconfig"
     ENV["LLMRUNNER_LIBRARY_PATH"] = "#{opt_libexec}/lib"
     system "swift", "build", "--configuration", "release", "--disable-sandbox"
