@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 actor ModelSupervisor {
@@ -27,7 +28,12 @@ actor ModelSupervisor {
         self.process = process
         self.activeModelID = model.id
 
-        try await waitForBackend()
+        do {
+            try await waitForBackend()
+        } catch {
+            stopCurrent()
+            throw error
+        }
     }
 
     func stopCurrent() {
@@ -36,6 +42,12 @@ actor ModelSupervisor {
         }
 
         process.terminate()
+        let deadline = Date().addingTimeInterval(5)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        process.waitUntilExit()
         self.process = nil
         self.activeModelID = nil
     }

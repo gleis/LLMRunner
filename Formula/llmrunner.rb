@@ -20,7 +20,7 @@ class Llmrunner < Formula
     resource("llama").stage do
       system "cmake", "-S", ".", "-B", "build", "-DCMAKE_BUILD_TYPE=Release",
              "-DCMAKE_INSTALL_PREFIX=#{libexec}", "-DCMAKE_OSX_DEPLOYMENT_TARGET=14.0",
-             "-DGGML_NATIVE=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF",
+             "-DGGML_NATIVE=OFF", "-DLLAMA_OPENSSL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF",
              "-DLLAMA_BUILD_SERVER=ON"
       system "cmake", "--build", "build", "--parallel"
       system "cmake", "--install", "build"

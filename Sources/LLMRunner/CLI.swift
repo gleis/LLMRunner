@@ -57,7 +57,21 @@ enum CLI {
             await service.handle(request)
         }
 
-        try await server.start()
+        let signals = [SIGINT, SIGTERM].map { number -> DispatchSourceSignal in
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+            source.setEventHandler { server.stop() }
+            source.resume()
+            return source
+        }
+        defer { signals.forEach { $0.cancel() } }
+        do {
+            try await server.start()
+        } catch {
+            await supervisor.stopCurrent()
+            throw error
+        }
+        await supervisor.stopCurrent()
     }
 
     private static func start(arguments: [String]) throws {

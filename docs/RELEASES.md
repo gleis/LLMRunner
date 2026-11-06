@@ -58,3 +58,5 @@ of the Developer ID signed DMG. Install from a local tap containing this formula
 no public tap or Homebrew-core submission is implied. The formula adds its private
 llama-server to the wrapper's PATH and links the private libraries, so it does not
 replace a separately installed llama.cpp.
+
+The managed loopback server is built without its optional OpenSSL HTTPS support. App downloads use URLSession HTTPS, and the app always proxies to the local backend over HTTP. Release packaging rejects unbundled native libraries so Homebrew installations cannot hide missing dependencies.

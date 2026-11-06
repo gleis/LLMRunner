@@ -117,5 +117,6 @@ if [[ "$CODESIGN" -eq 1 ]] && command -v codesign >/dev/null 2>&1; then
   codesign --force --deep --sign - "$APP_PATH"
 fi
 
+python3 "$ROOT_DIR/scripts/check-package-dependencies.py" "$APP_PATH"
 echo "Built $APP_PATH"
 echo "CLI wrapper: $DIST_DIR/llmrunner"

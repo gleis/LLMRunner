@@ -27,3 +27,5 @@ jobs:
           bash -n scripts/package-macos.sh
           python3 -m py_compile examples/python_chatbot.py
           ruby -c Formula/llmrunner.rb
+          scripts/package-macos.sh
+          dist/LLMRunner.app/Contents/Resources/bin/llama-server --help
