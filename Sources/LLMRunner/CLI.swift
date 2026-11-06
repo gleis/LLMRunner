@@ -40,10 +40,10 @@ enum CLI {
     }
 
     private static func serve(arguments: [String]) async throws {
+        let config = try AppConfig.loadOrCreate(arguments: arguments)
+        try config.validateSecurity()
         try RuntimePaths.ensureRuntimeDirectory()
         try writePID(getpid())
-
-        let config = try AppConfig.loadOrCreate(arguments: arguments)
         logStartupSecurityState(config)
         let supervisor = ModelSupervisor(config: config)
         let embeddedBackend = EmbeddedLlamaBackend()
@@ -75,6 +75,7 @@ enum CLI {
             print("Created default config at \(configURL.path)")
         }
 
+        try AppConfig.load(arguments: arguments).validateSecurity()
         let executable = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
         let process = Process()
         process.executableURL = executable
@@ -234,20 +235,7 @@ enum CLI {
     }
 
     private static func hasConfiguredAPIKey(_ config: AppConfig) -> Bool {
-        let security = config.effectiveSecurity
-        if security.apiKeys.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-            return true
-        }
-
-        guard
-            let envName = security.apiKeyEnv?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !envName.isEmpty,
-            let value = ProcessInfo.processInfo.environment[envName]?.trimmingCharacters(in: .whitespacesAndNewlines)
-        else {
-            return false
-        }
-
-        return !value.isEmpty
+        !config.configuredAPIKeys().isEmpty
     }
 
     private static func printTail(of url: URL, lines: Int) {

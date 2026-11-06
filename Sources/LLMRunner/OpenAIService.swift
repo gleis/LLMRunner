@@ -4,6 +4,7 @@ struct OpenAIService: Sendable {
     private let config: AppConfig
     private let supervisor: ModelSupervisor
     private let embeddedBackend: EmbeddedLlamaBackend
+    private let limiter = RequestLimiter()
 
     init(config: AppConfig, supervisor: ModelSupervisor, embeddedBackend: EmbeddedLlamaBackend) {
         self.config = config
@@ -17,6 +18,19 @@ struct OpenAIService: Sendable {
                 return Self.unauthorizedResponse()
             }
 
+            let health = request.method == "GET" && ["/health", "/v1/health"].contains(request.querylessPath)
+            if !health {
+                let key = configuredAPIKeys().isEmpty ? "local-anonymous" : (presentedAPIKey(in: request) ?? "local-anonymous")
+                let limit = config.effectiveSecurity.requestsPerMinute ?? 120
+                if !(await limiter.allow(key: key, limit: limit)) {
+                    var response = HTTPResponse.json(statusCode: 429, object: ["error": ["message": "Rate limit exceeded"]])
+                    response.headers["Retry-After"] = "60"
+                    return response
+                }
+                if let scopes = config.effectiveSecurity.keyScopes?.first(where: { $0.key.trimmingCharacters(in: .whitespacesAndNewlines) == key })?.value, !scopes.contains(request.querylessPath) {
+                    return .json(statusCode: 403, object: ["error": ["message": "API key does not allow this endpoint"]])
+                }
+            }
             switch (request.method, request.querylessPath) {
             case ("GET", "/health"), ("GET", "/v1/health"):
                 return .json(object: ["status": "ok"])
@@ -380,13 +394,13 @@ struct OpenAIService: Sendable {
     }
 
     private func isAuthorized(_ request: HTTPRequest) -> Bool {
-        if request.querylessPath == "/health" || request.querylessPath == "/v1/health" {
+        if request.method == "GET" && ["/health", "/v1/health"].contains(request.querylessPath) {
             return true
         }
 
         let keys = configuredAPIKeys()
         guard !keys.isEmpty else {
-            return true
+            return config.isLoopback
         }
 
         guard let presentedKey = presentedAPIKey(in: request) else {
@@ -397,19 +411,7 @@ struct OpenAIService: Sendable {
     }
 
     private func configuredAPIKeys() -> [String] {
-        let security = config.effectiveSecurity
-        var keys = security.apiKeys.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-
-        if
-            let envName = security.apiKeyEnv?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !envName.isEmpty,
-            let envValue = ProcessInfo.processInfo.environment[envName]?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !envValue.isEmpty
-        {
-            keys.append(envValue)
-        }
-
-        return keys.filter { !$0.isEmpty }
+        config.configuredAPIKeys()
     }
 
     private func presentedAPIKey(in request: HTTPRequest) -> String? {
@@ -532,5 +534,16 @@ private enum OpenAIServiceError: LocalizedError {
         case .modelNotFound(let model):
             return "Model '\(model)' was not found."
         }
+    }
+}
+
+actor RequestLimiter {
+    private var windows: [String: (start: TimeInterval, count: Int)] = [:]
+    func allow(key: String, limit: Int, now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
+        let previous = windows[key] ?? (start: now, count: 0)
+        let current = now - previous.start >= 60 ? (start: now, count: 0) : previous
+        guard current.count < limit else { return false }
+        windows[key] = (current.start, current.count + 1)
+        return true
     }
 }

@@ -97,6 +97,8 @@ enum HTTPStatus {
     static func reason(for statusCode: Int) -> String {
         switch statusCode {
         case 200: "OK"
+        case 403: "Forbidden"
+        case 429: "Too Many Requests"
         case 201: "Created"
         case 202: "Accepted"
         case 204: "No Content"

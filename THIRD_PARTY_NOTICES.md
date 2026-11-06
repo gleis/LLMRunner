@@ -29,3 +29,5 @@ https://github.com/ggml-org/ggml
 ## Models
 
 Downloaded model files are not part of this repository. Model licenses vary by publisher. Check the Hugging Face model card before redistributing or using a model commercially.
+
+Pinned source build: llama.cpp v0.9.0 (`cd959bae99ff4bed22bef2604f45241c09bbb8c8`), including its matching ggml tree, https://github.com/ggml-org/llama.cpp (MIT).

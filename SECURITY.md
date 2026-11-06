@@ -57,3 +57,5 @@ For private or gated Hugging Face models, LLMRunner reads `HF_TOKEN` from the en
 ## Reporting Issues
 
 If you find a security issue, please open a GitHub security advisory or contact the maintainers privately before posting exploit details publicly.
+
+Non-loopback frontend binds fail unless at least one nonblank API key resolves. Managed llama-server binds are loopback-only and cannot override `--host`. Optional endpoint scopes and per-key fixed-window rate limits apply before either inference backend runs.

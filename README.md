@@ -2,7 +2,7 @@
 
 LLMRunner is a no-GUI macOS service that exposes an OpenAI-compatible HTTP API for local GGUF models. It can run models in-process through embedded `libllama`, or proxy to `llama-server` as a fallback backend.
 
-> Alpha status: LLMRunner is useful today for local development and experiments, but it is not yet a polished consumer installer. The API binds to localhost by default. API key authentication is optional and should be enabled before binding to anything other than localhost.
+> Alpha status: LLMRunner is useful today for local development and experiments, but it is not yet a polished consumer installer. The API binds to localhost by default. Anonymous access is available on loopback; a configured API key is required for every non-loopback bind.
 
 It is intentionally small:
 
@@ -19,14 +19,15 @@ The default inference engine is embedded `libllama` from llama.cpp. LLMRunner ow
 Install the backend on your build machine:
 
 ```sh
-brew install llama.cpp
+brew install cmake pkg-config
+scripts/bootstrap-llama.sh
 ```
 
 Build and package:
 
 ```sh
-swift build -c release
-scripts/package-macos.sh --llama-server "$(which llama-server)"
+PKG_CONFIG_PATH="$PWD/.build/llama-install/lib/pkgconfig" swift build -c release
+scripts/package-macos.sh
 ```
 
 Pull a tiny model and start the service:
@@ -84,7 +85,8 @@ In server mode, LLMRunner looks for `backend.executable` in a bundle-friendly or
 For development, the quickest backend install is:
 
 ```sh
-brew install llama.cpp
+brew install cmake pkg-config
+scripts/bootstrap-llama.sh
 ```
 
 For distribution, the package script bundles `libllama`, `ggml`, ggml backend plugins, and `llama-server`.
@@ -266,14 +268,28 @@ Only one model process is kept active at a time. If a request asks for a differe
 
 - macOS only.
 - GGUF models only.
-- API authentication is optional and disabled until an API key is configured.
+- Loopback access can be anonymous. Non-loopback binding fails without a configured API key.
 - Embedded chat streaming is supported for `/v1/chat/completions`.
 - Embedded completion streaming is supported for `/v1/completions`.
 - Embedded embeddings depend on model compatibility; not every GGUF model is a good embedding model.
 - One active embedded model at a time.
 - Public binary releases still need Developer ID signing and notarization.
-- The package script currently expects Homebrew-provided `llama.cpp`/`ggml` libraries on the build machine.
+- The package script requires the pinned source build from `scripts/bootstrap-llama.sh`.
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Reproducible native dependency
+
+Install CMake and pkg-config, then run `scripts/bootstrap-llama.sh`. It builds llama.cpp v0.9.0 at commit `cd959bae99ff4bed22bef2604f45241c09bbb8c8`, including its matching ggml libraries, for macOS 14+. Build/test with `PKG_CONFIG_PATH="$PWD/.build/llama-install/lib/pkgconfig" swift test`. `scripts/package-macos.sh` packages the pinned libraries and server; it no longer installs or bundles an unpinned Homebrew llama.cpp. The source commit had no OSV matches on 2026-11-06; rerun dependency checks before future releases.
+
+The Codex Run action uses `script/build_and_run.sh`. `--build-only` verifies a build without launching the service. Source builds discover headers/libraries through pkg-config. `LLMRUNNER_LIBRARY_PATH` overrides the runtime library directory for custom builds.
+
+## Endpoint scopes and limits
+
+Optional `security.keyScopes` maps an exact configured API key to allowed endpoint paths, for example `{ "your-key": ["/v1/models", "/v1/embeddings"] }`. Keys omitted from this map retain full access; an empty list denies all authenticated API routes. Scope keys must match the trimmed configured keys exactly. `security.requestsPerMinute` defaults to 120 per key (one shared bucket for anonymous loopback clients). Exhaustion returns 429 and `Retry-After: 60`. Health GETs remain public and exempt. Both embedded and managed-server inference use these controls. The unauthenticated managed llama-server is restricted to loopback and rejects `--host` overrides.
+
+The current local package is ad-hoc signed. Developer ID signing, notarization, and a signed public release remain separate distribution requirements.
+
+After package verification, `scripts/sign-notarize.sh dist/LLMRunner.app` creates and validates a notarized DMG when `DEVELOPER_ID_APPLICATION` and `NOTARYTOOL_PROFILE` are configured.

@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$LLAMA_SERVER_PATH" ]]; then
-  LLAMA_SERVER_PATH="$(command -v llama-server || true)"
+  LLAMA_SERVER_PATH="$ROOT_DIR/.build/llama-install/bin/llama-server"
 fi
 
 if [[ -z "$LLAMA_SERVER_PATH" || ! -x "$LLAMA_SERVER_PATH" ]]; then
@@ -48,6 +48,13 @@ if [[ -z "$LLAMA_SERVER_PATH" || ! -x "$LLAMA_SERVER_PATH" ]]; then
 fi
 
 cd "$ROOT_DIR"
+LLAMA_PREFIX="${LLMRUNNER_LLAMA_PREFIX:-$ROOT_DIR/.build/llama-install}"
+if [[ ! -f "$LLAMA_PREFIX/lib/pkgconfig/llama.pc" ]]; then
+  echo "Run scripts/bootstrap-llama.sh before packaging." >&2
+  exit 1
+fi
+export PKG_CONFIG_PATH="$LLAMA_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+export LLMRUNNER_LIBRARY_PATH="$LLAMA_PREFIX/lib"
 swift build -c release
 
 rm -rf "$APP_PATH"
@@ -61,21 +68,7 @@ cp "$ROOT_DIR/.build/release/llmrunner" "$APP_PATH/Contents/MacOS/llmrunner"
 cp "$LLAMA_SERVER_PATH" "$APP_PATH/Contents/Resources/bin/llama-server"
 cp "$ROOT_DIR/config.example.json" "$APP_PATH/Contents/Resources/config.example.json"
 
-LLAMA_PREFIX="$(brew --prefix llama.cpp 2>/dev/null || true)"
-GGML_PREFIX="$(brew --prefix ggml 2>/dev/null || true)"
-
-if [[ -n "$LLAMA_PREFIX" && -d "$LLAMA_PREFIX/lib" ]]; then
-  cp -R "$LLAMA_PREFIX"/lib/libllama*.dylib "$APP_PATH/Contents/Resources/lib/"
-  cp -R "$LLAMA_PREFIX"/lib/libmtmd*.dylib "$APP_PATH/Contents/Resources/lib/"
-fi
-
-if [[ -n "$GGML_PREFIX" && -d "$GGML_PREFIX/lib" ]]; then
-  cp -R "$GGML_PREFIX"/lib/libggml*.dylib "$APP_PATH/Contents/Resources/lib/"
-fi
-
-if [[ -n "$GGML_PREFIX" && -d "$GGML_PREFIX/libexec" ]]; then
-  cp -R "$GGML_PREFIX"/libexec/libggml*.so "$APP_PATH/Contents/Resources/libexec/"
-fi
+cp -R "$LLAMA_PREFIX"/lib/*.dylib "$APP_PATH/Contents/Resources/lib/"
 
 cat > "$APP_PATH/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -109,20 +102,11 @@ exec "$SCRIPT_DIR/LLMRunner.app/Contents/MacOS/llmrunner" "$@"
 SH
 chmod +x "$DIST_DIR/llmrunner"
 
-if command -v install_name_tool >/dev/null 2>&1; then
-  install_name_tool \
-    -change /opt/homebrew/opt/llama.cpp/lib/libllama.0.dylib @executable_path/../Resources/lib/libllama.0.dylib \
-    -change /opt/homebrew/opt/ggml/lib/libggml.0.dylib @executable_path/../Resources/lib/libggml.0.dylib \
-    -change /opt/homebrew/opt/ggml/lib/libggml-base.0.dylib @executable_path/../Resources/lib/libggml-base.0.dylib \
-    "$APP_PATH/Contents/MacOS/llmrunner"
-
-  while IFS= read -r dylib; do
-    install_name_tool \
-      -change /opt/homebrew/opt/ggml/lib/libggml.0.dylib @loader_path/libggml.0.dylib \
-      -change /opt/homebrew/opt/ggml/lib/libggml-base.0.dylib @loader_path/libggml-base.0.dylib \
-      "$dylib" || true
-  done < <(find "$APP_PATH/Contents/Resources/lib" -type f -name '*.dylib')
-fi
+# Libraries use @rpath; make every shipped binary independently relocatable.
+while IFS= read -r dylib; do
+  install_name_tool -add_rpath @loader_path "$dylib"
+done < <(find "$APP_PATH/Contents/Resources/lib" -type f -name '*.dylib')
+install_name_tool -add_rpath @executable_path/../lib "$APP_PATH/Contents/Resources/bin/llama-server"
 
 if [[ "$CODESIGN" -eq 1 ]] && command -v codesign >/dev/null 2>&1; then
   while IFS= read -r binary; do

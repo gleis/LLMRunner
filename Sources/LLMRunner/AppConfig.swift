@@ -27,6 +27,9 @@ struct AppConfig: Codable, Sendable {
         var apiKeys: [String]
         var apiKeyEnv: String?
         var maxRequestBodyBytes: Int?
+        /// Optional endpoint paths per key. Unlisted keys keep full API access.
+        var keyScopes: [String: [String]]? = nil
+        var requestsPerMinute: Int? = nil
     }
 
     struct Logging: Codable, Sendable {
@@ -130,6 +133,42 @@ struct AppConfig: Codable, Sendable {
         security ?? Security(apiKeys: [], apiKeyEnv: "LLMRUNNER_API_KEY", maxRequestBodyBytes: 10_485_760)
     }
 
+    func configuredAPIKeys(environment: [String: String] = ProcessInfo.processInfo.environment) -> [String] {
+        let security = effectiveSecurity
+        var keys = security.apiKeys
+        if let name = security.apiKeyEnv?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !name.isEmpty, let key = environment[name] { keys.append(key) }
+        return keys.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+
+    var isLoopback: Bool {
+        ["127.0.0.1", "localhost", "::1"].contains(server.host.lowercased())
+    }
+
+    func validateSecurity(environment: [String: String] = ProcessInfo.processInfo.environment) throws {
+        if !isLoopback && configuredAPIKeys(environment: environment).isEmpty {
+            throw SecurityError.keyRequired
+        }
+        if !usesEmbeddedBackend {
+            let hosts = ["127.0.0.1", "localhost", "::1"]
+            let extra = backend.extraArguments + models.flatMap { $0.arguments }
+            if !hosts.contains(backend.host.lowercased()) || extra.contains(where: { $0 == "--host" || $0.hasPrefix("--host=") }) {
+                throw SecurityError.backendMustBeLocal
+            }
+        }
+        if let scopes = effectiveSecurity.keyScopes {
+            let configured = Set(configuredAPIKeys(environment: environment))
+            for key in scopes.keys {
+                if key.isEmpty || key != key.trimmingCharacters(in: .whitespacesAndNewlines) || !configured.contains(key) {
+                    throw SecurityError.invalidScopeKey
+                }
+            }
+        }
+        if let limit = effectiveSecurity.requestsPerMinute, limit <= 0 {
+            throw SecurityError.invalidRateLimit
+        }
+    }
+
     var effectiveLogging: Logging {
         logging ?? Logging(requests: true, level: "info")
     }
@@ -162,6 +201,18 @@ enum ConfigError: LocalizedError {
         switch self {
         case .missingConfig(let path):
             return "Missing config at \(path). Create one from config.example.json or pass --config /path/to/config.json."
+        }
+    }
+}
+
+enum SecurityError: LocalizedError {
+    case keyRequired, invalidRateLimit, backendMustBeLocal, invalidScopeKey
+    var errorDescription: String? {
+        switch self {
+        case .keyRequired: "An API key is required when binding outside localhost. Configure security.apiKeys or LLMRUNNER_API_KEY."
+        case .backendMustBeLocal: "The managed llama-server backend must bind to loopback; --host overrides are not allowed."
+        case .invalidScopeKey: "security.keyScopes keys must exactly match configured, trimmed API keys."
+        case .invalidRateLimit: "security.requestsPerMinute must be greater than zero."
         }
     }
 }
