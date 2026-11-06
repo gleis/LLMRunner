@@ -103,6 +103,7 @@ SH
 chmod +x "$DIST_DIR/llmrunner"
 
 # Libraries use @rpath; make every shipped binary independently relocatable.
+install_name_tool -delete_rpath "$LLAMA_PREFIX/lib" "$APP_PATH/Contents/MacOS/llmrunner"
 while IFS= read -r dylib; do
   install_name_tool -add_rpath @loader_path "$dylib"
 done < <(find "$APP_PATH/Contents/Resources/lib" -type f -name '*.dylib')
