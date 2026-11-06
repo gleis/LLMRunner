@@ -47,7 +47,7 @@ curl http://127.0.0.1:8080/v1/models
 Try the example chatbot:
 
 ```sh
-python3 examples/python_chatbot.py --model smollm2-135m
+python3 examples/python_chatbot.py --model qwen3-0.6b
 ```
 
 ## Backends
@@ -205,7 +205,7 @@ llmrunner logs --errors
 There is a small dependency-free Python chatbot in `examples/python_chatbot.py`:
 
 ```sh
-python3 examples/python_chatbot.py --model smollm2-135m
+python3 examples/python_chatbot.py --model qwen3-0.6b
 ```
 
 It talks to `http://127.0.0.1:8080/v1` and keeps conversation history in memory until you type `/quit`.
@@ -293,3 +293,5 @@ Optional `security.keyScopes` maps an exact configured API key to allowed endpoi
 The current local package is ad-hoc signed. Developer ID signing, notarization, and a signed public release remain separate distribution requirements.
 
 After package verification, `scripts/sign-notarize.sh dist/LLMRunner.app` creates and validates a notarized DMG when `DEVELOPER_ID_APPLICATION` and `NOTARYTOOL_PROFILE` are configured.
+
+`tiny` now selects the official Qwen3-0.6B Q8_0 GGUF. Existing configured models are preserved. `models list` reports managed storage and available disk space. `models prune` previews unconfigured directories under the managed model root; `models prune --delete` removes them. Configured models, external files, hidden directories, and symlinks are excluded. Stop the service before deleting unused weights.

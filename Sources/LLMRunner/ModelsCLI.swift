@@ -9,9 +9,9 @@ enum ModelsCLI {
 
     private static let catalog: [String: CatalogEntry] = [
         "tiny": CatalogEntry(
-            id: "smollm2-135m",
-            repoID: "jc-builds/SmolLM2-135M-Instruct-Q4_K_M-GGUF",
-            quantization: "Q4_K_M"
+            id: "qwen3-0.6b",
+            repoID: "Qwen/Qwen3-0.6B-GGUF",
+            quantization: "Q8_0"
         )
     ]
 
@@ -21,6 +21,8 @@ enum ModelsCLI {
         switch subcommand {
         case "list":
             try list(arguments: arguments)
+        case "prune":
+            try prune(arguments: arguments)
         case "search":
             try await search(arguments: arguments)
         case "files":
@@ -37,6 +39,12 @@ enum ModelsCLI {
     private static func list(arguments: [String]) throws {
         let config = try AppConfig.loadOrCreate(arguments: arguments)
 
+        let bytes = ModelStorage.bytes(at: RuntimePaths.modelsDirectory)
+        print("Managed storage: \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))")
+        if let attributes = try? FileManager.default.attributesOfFileSystem(forPath: RuntimePaths.directory.path),
+           let available = attributes[.systemFreeSize] as? NSNumber {
+            print("Available disk: \(ByteCountFormatter.string(fromByteCount: available.int64Value, countStyle: .file))")
+        }
         if config.models.isEmpty {
             print("No models configured.")
             return
@@ -49,6 +57,18 @@ enum ModelsCLI {
             let size = fileSizeDescription(path: path)
             print("\(marker) \(model.id) \(exists ? "installed" : "missing") \(size) \(path)")
         }
+    }
+
+    private static func prune(arguments: [String]) throws {
+        let config = try AppConfig.loadOrCreate(arguments: arguments)
+        let candidates = try ModelStorage.orphanDirectories(root: RuntimePaths.modelsDirectory, configuredPaths: config.models.map(\.path))
+        let apply = arguments.contains("--delete")
+        for directory in candidates {
+            let size = ByteCountFormatter.string(fromByteCount: ModelStorage.bytes(at: directory), countStyle: .file)
+            if apply { try FileManager.default.removeItem(at: directory) }
+            print("\(apply ? "Removed" : "Would remove") \(directory.path) (\(size))")
+        }
+        if !apply { print("Preview only. Use models prune --delete to remove these unconfigured managed directories.") }
     }
 
     private static func search(arguments: [String]) async throws {

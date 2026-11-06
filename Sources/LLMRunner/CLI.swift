@@ -202,6 +202,7 @@ enum CLI {
           llmrunner models pull <search query> [--quant Q4_K_M]
           llmrunner models pull <id> --url <url> [--config path]
           llmrunner models delete <id> [--config path]
+          llmrunner models prune [--delete] [--config path]
         """)
     }
 
