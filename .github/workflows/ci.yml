@@ -13,7 +13,7 @@ jobs:
         os: [macos-15, macos-26]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: brew install cmake pkg-config
       - run: python3 scripts/audit-llama.py
       - name: Build pinned llama.cpp
