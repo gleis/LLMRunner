@@ -1,9 +1,9 @@
 class Llmrunner < Formula
   desc "Local OpenAI-compatible GGUF model server for macOS"
   homepage "https://github.com/gleis/LLMRunner"
-  url "https://github.com/gleis/LLMRunner/archive/648a2e4e5ab49ef2b66c20373a96f81f2a7bc812.tar.gz"
+  url "https://github.com/gleis/LLMRunner/archive/920773828e0d0d68f7d42c7a4f020b91199bf24a.tar.gz"
   version "0.1.0"
-  sha256 "b426192f87898d7f015c16aee7c2295c15f2b73438395ee9cba3b92aa13c79c6"
+  sha256 "b0bd8e8350f9ad04e5a5b073cd605994ab94a28c74b0d5f5b06108152f47bfc5"
   license "MIT"
 
   depends_on "cmake" => :build
