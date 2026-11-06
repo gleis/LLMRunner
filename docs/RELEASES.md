@@ -49,3 +49,12 @@ Checklist:
 ## Notarization
 
 The current package script uses ad-hoc signing. For public downloadable binaries, use a Developer ID certificate and Apple notarization before publishing.
+
+### Homebrew source formula
+
+`Formula/llmrunner.rb` builds the verified source revision and pinned llama.cpp
+resource from SHA-256 checked archives. This is a source installation, independent
+of the Developer ID signed DMG. Install from a local tap containing this formula;
+no public tap or Homebrew-core submission is implied. The formula adds its private
+llama-server to the wrapper's PATH and links the private libraries, so it does not
+replace a separately installed llama.cpp.
